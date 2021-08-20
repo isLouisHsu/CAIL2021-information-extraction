@@ -1,0 +1,7 @@
+*.pyc
+output/*
+cache/*
+data/ner-*
+.vscode/
+.ipynb_checkpoints/
+!.gitkeep
