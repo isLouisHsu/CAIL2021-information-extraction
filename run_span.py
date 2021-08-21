@@ -31,6 +31,7 @@ from transformers.modeling_outputs import TokenClassifierOutput
 
 # trainer & training arguments
 from transformers import AdamW, get_linear_schedule_with_warmup
+from lamb import Lamb
 
 # metrics
 from seqeval.metrics.sequence_labeling import (
@@ -40,6 +41,7 @@ from seqeval.metrics.sequence_labeling import (
     f1_score, precision_score, recall_score,
     get_entities
 )
+from utils import  LABEL_MEANING_MAP
 
 class BertConfigSpanV2(BertConfig):
 
@@ -232,6 +234,7 @@ class NerArgumentParser(ArgumentParser):
         
         self.add_argument("--max_span_length", default=10, type=int)
         self.add_argument("--width_embedding_dim", default=150, type=int)
+        self.add_argument("--optimizer", default="adamw", type=str)
         
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
@@ -353,65 +356,25 @@ class NerProcessor(DataProcessor):
                 ner_tags[i] = f"I-{t}"
         return ner_tags
 
-# class ClueNerProcessor(NerProcessor):
-
-#     def get_labels(self):
-#         return [
-#             "X", "O", "[START]", "[END]",
-#             "address", "book", "company", "game", "government", 
-#             "movie", "name", "organization", "position","scene",
-#         ]
-    
-#     def _create_examples(self, data_dir, data_file, mode):
-#         data_path = os.path.join(data_dir, data_file)
-#         with open(data_path, encoding="utf-8") as f:
-#             lines = [json.loads(line) for line in f.readlines()]
-#             for sentence_counter, line in enumerate(lines):
-#                 text = line["text"]
-#                 label = line.get("label", None)
-#                 entities = []
-#                 if label is not None:
-#                     ner_tags = ["O"] * len(text)
-#                     for entity_type, entities in line["label"].items():
-#                         for entity_text, entity_positions in entities.items():
-#                             for start_, end_ in entity_positions:
-#                                 assert text[start_: end_ + 1] == entity_text
-#                                 ner_tags[start_] = f"B-{entity_type}"
-#                                 ner_tags[start_ + 1: end_ + 1] = [f"I-{entity_type}"] * (end_ - start_)
-#                     entities = get_entities(ner_tags)
-#                 sentence = (
-#                     sentence_counter,
-#                     {
-#                         "id": f"{mode}-{str(sentence_counter)}",
-#                         "tokens": list(line["text"]),
-#                         "entities": entities if mode in ["train", "dev"] else [],
-#                     }
-#                 )
-#                 yield sentence
-
 class CailNerProcessor(NerProcessor):
 
     def get_labels(self):
         return [
             "X", "O", "[START]", "[END]",
-            "address", "book", "company", "game", "government", 
-            "movie", "name", "organization", "position","scene",
-        ]
+        ] + list(LABEL_MEANING_MAP.keys())
     
-    # TODO:
     def _create_examples(self, data_dir, data_file, mode):
         data_path = os.path.join(data_dir, data_file)
         with open(data_path, encoding="utf-8") as f:
             lines = [json.loads(line) for line in f.readlines()]
             for sentence_counter, line in enumerate(lines):
-                text = line["text"]
-                entities = line.get("entities", None)
                 sentence = (
                     sentence_counter,
                     {
                         "id": f"{mode}-{str(line['id'])}",
                         "tokens": list(line["text"]),
-                        "entities": entities if mode in ["train", "dev"] else None,
+                        "entities": line.get("entities", None) 
+                            if mode in ["train", "dev"] else None,
                         "sent_start": line["sent_start"],
                         "sent_end": line["sent_end"],
                     }
@@ -464,11 +427,10 @@ class Example2Feature:
     def __call__(self, example):
         return self._convert_example_to_feature(example)
     
-    def _encode_span(self, max_length, input_len):
-        # TODO: sent_start, sent_end
+    def _encode_span(self, max_length, input_len, sent_start, sent_end):
         spans = []; span_mask = []
-        for i in range(max_length):
-            for j in range(i, min(max_length, i + self.max_span_length)):
+        for i in range(sent_start, sent_end):
+            for j in range(i, min(min(max_length, sent_end), i + self.max_span_length)):
                 spans.append([i, j, j - i + 1])
                 span_mask.append(0 if i >= input_len else 1)
         spans = torch.tensor([spans])               # (1, num_spans, 3) 
@@ -476,9 +438,8 @@ class Example2Feature:
         return spans, span_mask
 
     def _encode_label(self, entities, spans):
-        # TODO:
         tag_o = self.label2id["O"]
-        entities = {(b + 1, e + 1): self.label2id[t] for t, b, e in entities}
+        entities = {(b + 1, e + 1): self.label2id[t] for t, b, e, _ in entities}
         label = [entities.get((b, e), tag_o) for b, e, l in spans[0]]
         label = torch.tensor([label])               # (1, num_spans)
         return label
@@ -487,6 +448,8 @@ class Example2Feature:
         id_ = example[1]["id"]
         tokens = example[1]["tokens"]
         entities = example[1]["entities"]
+        sent_start = example[1]["sent_start"]
+        sent_end = example[1]["sent_end"]
 
         # encode input
         inputs = self.tokenizer.encode_plus(
@@ -502,7 +465,8 @@ class Example2Feature:
         inputs["input_len"] = inputs["attention_mask"].sum(dim=1)  # for special tokens
         input_len = inputs["input_len"].item()
         # inputs["spans"], inputs["span_mask"] = self._encode_span(self.max_seq_length, input_len)
-        inputs["spans"], inputs["span_mask"] = self._encode_span(input_len, input_len)  # dynamic batch
+        inputs["spans"], inputs["span_mask"] = self._encode_span(
+            input_len, input_len, sent_start, sent_end)  # dynamic batch
         
         if entities is None:
             inputs["label"] = None
@@ -604,7 +568,10 @@ def train(args, model, processor, tokenizer):
          'weight_decay': args.weight_decay, 'lr': args.other_learning_rate}
     ]
     args.warmup_steps = int(t_total * args.warmup_proportion)
-    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+    if args.optimizer == "adamw":
+        optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+    elif args.optimizer == "lamb":
+        optimizer = Lamb(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
                                                 num_training_steps=t_total)
     # Check if saved optimizer or scheduler states exist
@@ -799,13 +766,13 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
         # calculate metrics
         preds = model.span.decode_batch(logits, batch["spans"], batch["span_mask"])
         for pred_no, (pred, input_len) in enumerate(zip(preds, batch["input_len"])):
-            pred = [(id2label[t], b, e) for t, b, e in pred if id2label[t] != "O"]
+            pred = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in pred if id2label[t] != "O"]
             pred = processor.entities2tags(pred, input_len - 2)
             y_pred.append(pred)
 
         labels = model.span.decode_batch(batch["label"], batch["spans"], batch["span_mask"], is_logits=False)
         for label_no, (label, input_len) in enumerate(zip(labels, batch["input_len"])):
-            label = [(id2label[t], b, e) for t, b, e in label if id2label[t] != "O"]
+            label = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in label if id2label[t] != "O"]
             label = processor.entities2tags(label, input_len - 2)
             y_true.append(label)
 
@@ -886,13 +853,13 @@ def load_dataset(args, processor, tokenizer, data_type='train'):
 if __name__ == "__main__":
 
     parser = NerArgumentParser()
-    # if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
-    #     # If we pass only one argument to the script and it's the path to a json file,
-    #     # let's parse it to get our arguments.
-    #     args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
-    # else:
-    #     args = parser.build_arguments().parse_args()
-    args = parser.parse_args_from_json(json_file="args/bert_span-baseline.json")
+    if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
+        # If we pass only one argument to the script and it's the path to a json file,
+        # let's parse it to get our arguments.
+        args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
+    else:
+        args = parser.build_arguments().parse_args()
+    # args = parser.parse_args_from_json(json_file="args/bert_span-baseline.json")
 
     # Set seed before initializing model.
     seed_everything(args.seed)

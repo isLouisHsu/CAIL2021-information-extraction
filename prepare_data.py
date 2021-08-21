@@ -13,7 +13,7 @@ if __name__ == '__main__':
     parser.add_argument("--data_files", type=str, nargs="+", 
         default=["./data/信息抽取_第一阶段/xxcq_small.json"],  
         help="Data files.")
-    parser.add_argument("--context_window", default=510, type=int, 
+    parser.add_argument("--context_window", default=0, type=int, 
         help="Size of context window.")
     parser.add_argument("--train_split_ratio", default=0.8, type=float, 
         help="Size of training data.")
@@ -32,6 +32,7 @@ if __name__ == '__main__':
     raw_samples = []
     for data_file in args.data_files:
         raw_samples.extend(utils.load_raw(data_file))
+        # TODO: [-STARTDOC-]
     num_samples = len(raw_samples)
     logging.info(f"Number of raw samples: {num_samples}")
 
@@ -68,7 +69,7 @@ if __name__ == '__main__':
             for label, start, end, span_text in raw_samples[i]["entities"]:
                 start += sent_start; end += sent_start
                 assert text[start: end] == span_text
-                entities.append((label, start, end, span_text))
+                entities.append((label, start, end - 1, span_text))
             
             raw_samples[i]["text"] = text
             raw_samples[i]["sent_start"] = sent_start
