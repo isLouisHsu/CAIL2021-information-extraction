@@ -69,7 +69,7 @@ if __name__ == '__main__':
             for label, start, end, span_text in raw_samples[i]["entities"]:
                 start += sent_start; end += sent_start
                 assert text[start: end] == span_text
-                entities.append((label, start, end - 1, span_text))
+                entities.append((label, start, end, span_text))
             
             raw_samples[i]["text"] = text
             raw_samples[i]["sent_start"] = sent_start
@@ -84,11 +84,6 @@ if __name__ == '__main__':
     dev_samples = raw_samples[num_train:]
     logging.info(f"Number of training data: {num_train}, number of dev data: {num_dev}")
 
-    # save
-    def save(filename, samples):
-        with open(filename, "w") as f:
-            for sample in samples:
-                sample = json.dumps(sample, ensure_ascii=False) + "\n"
-                f.write(sample)
-    save(os.path.join(args.output_dir, "train.json"), train_samples)
-    save(os.path.join(args.output_dir, "dev.json"), dev_samples)
+    # save samples
+    utils.save_samples(os.path.join(args.output_dir, "train.json"), train_samples)
+    utils.save_samples(os.path.join(args.output_dir, "dev.json"), dev_samples)

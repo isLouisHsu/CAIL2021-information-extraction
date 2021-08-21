@@ -155,6 +155,8 @@ class BertSpanV2ForNer(BertPreTrainedModel):
         span_mask=None,     # (batch_size, num_spans)
         label=None,         # (batch_size, num_spans)
         input_len=None,     # (batch_size)
+        sent_start=None,    # (batch_size)
+        sent_end=None,      # (batch_size)
         head_mask=None,
         inputs_embeds=None,
         output_attentions=None,
@@ -404,9 +406,10 @@ class NerDataset(torch.utils.data.Dataset):
     def collate_fn(batch):
         max_len = max([b["input_len"] for b in batch])[0].item()
         collated = dict()
-        for k in ["input_ids", "token_type_ids", "attention_mask", "input_len"]:
+        for k in ["input_ids", "token_type_ids", "attention_mask", "input_len", "sent_start", "sent_end"]:
             t = torch.cat([b[k] for b in batch], dim=0)
-            if k != "input_len": t = t[:, :max_len] # dynamic batch
+            if k not in ["input_len", "sent_start", "sent_end"]:
+                t = t[:, :max_len] # dynamic batch
             collated[k] = t
         for k in ["spans", "span_mask", "label"]:
             if batch[0][k] is None:
@@ -464,9 +467,10 @@ class Example2Feature:
         )
         inputs["input_len"] = inputs["attention_mask"].sum(dim=1)  # for special tokens
         input_len = inputs["input_len"].item()
-        # inputs["spans"], inputs["span_mask"] = self._encode_span(self.max_seq_length, input_len)
         inputs["spans"], inputs["span_mask"] = self._encode_span(
             input_len, input_len, sent_start, sent_end)  # dynamic batch
+        inputs["sent_start"] = torch.tensor([sent_start])
+        inputs["sent_end"] = torch.tensor([sent_end])
         
         if entities is None:
             inputs["label"] = None
@@ -765,16 +769,19 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
         
         # calculate metrics
         preds = model.span.decode_batch(logits, batch["spans"], batch["span_mask"])
-        for pred_no, (pred, input_len) in enumerate(zip(preds, batch["input_len"])):
+        for pred_no, (pred, input_len, start, end) in enumerate(zip(
+                preds, batch["input_len"], batch["sent_start"], batch["sent_end"])):
             pred = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in pred if id2label[t] != "O"]
             pred = processor.entities2tags(pred, input_len - 2)
-            y_pred.append(pred)
+            y_pred.append(pred[start: end])
 
-        labels = model.span.decode_batch(batch["label"], batch["spans"], batch["span_mask"], is_logits=False)
-        for label_no, (label, input_len) in enumerate(zip(labels, batch["input_len"])):
+        labels = model.span.decode_batch(batch["label"], batch["spans"], batch["span_mask"], 
+            batch["sent_start"], batch["sent_end"], is_logits=False)
+        for label_no, (label, input_len, start, end) in enumerate(zip(
+                labels, batch["input_len"], batch["sent_start"], batch["sent_end"])):
             label = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in label if id2label[t] != "O"]
             label = processor.entities2tags(label, input_len - 2)
-            y_true.append(label)
+            y_true.append(label[start: end])
 
     results = classification_report(y_true, y_pred, digits=6, output_dict=True, scheme=args.scheme)
     results['loss'] = eval_loss / nb_eval_steps
@@ -813,11 +820,16 @@ def predict(args, model, processor, tokenizer, prefix=""):
         preds = model.span.decode_batch(logits, batch["spans"], batch["span_mask"])
         pred, input_len = preds[0], batch["input_len"][0]
         pred = [(id2label[t], b, e) for t, b, e in pred if id2label[t] != "O"]
-        pred = processor.entities2tags(pred, input_len - 2)
+        pred = processor.entities2tags(pred, input_len - 2), 
+        pred = pred[batch["sent_start"][0]: batch["sent_end"][0]]
+        label_entities_map = {label: [] for label in LABEL_MEANING_MAP.keys()}
+        for t, b, e in get_entities(pred):
+            label_entities_map[t].append(f"{b};{e-1}")
+        entities = [{"label": label, "span": label_entities_map[label]} for label in LABEL_MEANING_MAP.keys()]
+        # 预测结果文件为一个json格式的文件，包含两个字段，分别为``id``和``entities``
         results.append({
-            "id": step,
-            "tag_seq": " ".join(pred),
-            "entities": get_entities(pred)
+            "id": test_dataset.examples[step][1]["id"],
+            "entities": entities,
         })
     
     logger.info("\n")

@@ -57,11 +57,17 @@ def load_raw(filepath):
                     start, end = int(start), int(end)
                     r["entities"].append((
                         entity["label"], 
-                        start, end,
+                        start, end - 1,
                         context[start: end]
                     ))
             raw.append(r)
     return raw
+
+def save_samples(filename, samples):
+    with open(filename, "w") as f:
+        for sample in samples:
+            sample = json.dumps(sample, ensure_ascii=False) + "\n"
+            f.write(sample)
 
 if __name__ == "__main__":
     load_raw("./data/信息抽取_第一阶段/xxcq_small.json")
