@@ -51,15 +51,16 @@ def load_raw(filepath):
             r["sent_start"] = 0
             r["sent_end"] = len(context)
             r["entities"] = []
-            for entity in line["entities"]:
-                for span in entity["span"]:
-                    start, end = span.split(";")
-                    start, end = int(start), int(end)
-                    r["entities"].append((
-                        entity["label"], 
-                        start, end - 1,
-                        context[start: end]
-                    ))
+            if "entities" in line:
+                for entity in line["entities"]:
+                    for span in entity["span"]:
+                        start, end = span.split(";")
+                        start, end = int(start), int(end)
+                        r["entities"].append((
+                            entity["label"], 
+                            start, end - 1,
+                            context[start: end]
+                        ))
             raw.append(r)
     return raw
 
