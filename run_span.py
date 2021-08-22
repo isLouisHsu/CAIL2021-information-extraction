@@ -824,11 +824,11 @@ def predict(args, model, processor, tokenizer, prefix=""):
         pred = pred[batch["sent_start"][0]: batch["sent_end"][0]]
         label_entities_map = {label: [] for label in LABEL_MEANING_MAP.keys()}
         for t, b, e in get_entities(pred):
-            label_entities_map[t].append(f"{b};{e-1}")
+            label_entities_map[t].append(f"{b};{e}")
         entities = [{"label": label, "span": label_entities_map[label]} for label in LABEL_MEANING_MAP.keys()]
         # 预测结果文件为一个json格式的文件，包含两个字段，分别为``id``和``entities``
         results.append({
-            "id": test_dataset.examples[step][1]["id"],
+            "id": test_dataset.examples[step][1]["id"].split("-")[1],
             "entities": entities,
         })
     

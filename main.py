@@ -19,18 +19,20 @@ def main():
     dataset_name = args.dataset_name
     seed = args.seed
 
+    # upload
     raw_samples = utils.load_raw(infile)
     utils.save_samples(os.path.join(data_dir, "test.json"), raw_samples)
     os.system(f"sudo /home/user/miniconda/bin/python3 run_span.py {json_file}")
-    # os.system(f"sudo cp ./output/ner-{dataset_name}-{model_type}-{version}-{seed}/test_prediction.json {outfile}")
-    with open(f"./output/ner-{dataset_name}-{model_type}-{version}-{seed}/test_prediction.json", "r") as f:
-        content = f.read()
-    with open(outfile, "w") as f:
-        f.write(content)
-    
-    # local test
+    os.system(f"sudo cp ./output/ner-{dataset_name}-{model_type}-{version}-{seed}/test_prediction.json {outfile}")
+
+    # # local test
     # os.system(f"python run_span.py {json_file}")
-    # os.system(f"sudo mv ./output/ner-{dataset_name}-{model_type}-{version}-{seed}/test_prediction.json ./output.json")
+    # os.system(f"mv ./output/ner-{dataset_name}-{model_type}-{version}-{seed}/test_prediction.json ./output.json")
+
+    # with open(f"./output/ner-{dataset_name}-{model_type}-{version}-{seed}/test_prediction.json", "r") as f:
+    #     content = f.read()
+    # with open(outfile, "w") as f:
+    #     f.write(content)
 
 if __name__ == '__main__':
     main()
