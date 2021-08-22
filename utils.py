@@ -1,4 +1,5 @@
 import os
+import copy
 import json
 import torch
 import random
@@ -69,6 +70,62 @@ def save_samples(filename, samples):
         for sample in samples:
             sample = json.dumps(sample, ensure_ascii=False) + "\n"
             f.write(sample)
+
+def add_context(ordered_samples, context_window):
+    if context_window <= 0:
+        return ordered_samples
+
+    samples = copy.deepcopy(ordered_samples)
+    for i in range(len(samples)):
+        if i == 0: continue
+        text = samples[i]["text"]
+        add_left = (context_window-len(text)) // 2
+        add_right = (context_window-len(text)) - add_left
+        sent_start, sent_end = samples[i]["sent_start"], samples[i]["sent_end"]
+
+        # add left context
+        j = i - 1
+        while j >= 0 and add_left > 0:
+            context_to_add = samples[j]["text"][-add_left:]
+            text = context_to_add + text
+            add_left -= len(context_to_add)
+            sent_start += len(context_to_add)
+            sent_end += len(context_to_add)
+            j -= 1
+
+        # add right context
+        j = i + 1
+        while j < len(samples) and add_right > 0:
+            context_to_add = samples[j]["text"][:add_right]
+            text = text + context_to_add
+            add_right -= len(context_to_add)
+            j += 1
+        
+        # adjust entities
+        entities = []
+        for label, start, end, span_text in samples[i]["entities"]:
+            start += sent_start; end += sent_start
+            span_text_new = text[start: end + 1]
+            assert span_text_new == span_text, "Error"
+            entities.append((label, start, end, span_text))
+        
+        samples[i]["text"] = text
+        samples[i]["sent_start"] = sent_start
+        samples[i]["sent_end"] = sent_end
+        samples[i]["entities"] = entities
+    return samples
+
+def get_ner_tags(entities, seq_len):
+    ner_tags = ["O"] * seq_len
+    for entity in entities:
+        t, s, e = entity[:3]
+        if s < 0 or s >= seq_len or e < 0 or e >= seq_len \
+            or s > e or ner_tags[s] != "O" or ner_tags[e] != "O":
+            continue
+        ner_tags[s] = f"B-{t}"
+        for i in range(s + 1, e + 1):
+            ner_tags[i] = f"I-{t}"
+    return ner_tags
 
 if __name__ == "__main__":
     load_raw("./data/信息抽取_第一阶段/xxcq_small.json")

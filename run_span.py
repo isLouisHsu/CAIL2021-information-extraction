@@ -28,6 +28,7 @@ from transformers import (
     BertModel,
 )
 from transformers.modeling_outputs import TokenClassifierOutput
+from nezha.modeling_nezha import NeZhaModel, NeZhaPreTrainedModel
 
 # trainer & training arguments
 from transformers import AdamW, get_linear_schedule_with_warmup
@@ -41,7 +42,7 @@ from seqeval.metrics.sequence_labeling import (
     f1_score, precision_score, recall_score,
     get_entities
 )
-from utils import  LABEL_MEANING_MAP
+from utils import LABEL_MEANING_MAP, get_ner_tags
 
 class BertConfigSpanV2(BertConfig):
 
@@ -133,6 +134,57 @@ class SpanV2Loss(nn.Module):
         loss = loss[loss_mask].mean()
         return loss
 
+def forward(
+    cls,
+    input_ids=None,
+    attention_mask=None,
+    token_type_ids=None,
+    position_ids=None,
+    spans=None,         # (batch_size, num_spans, 3)
+    span_mask=None,     # (batch_size, num_spans)
+    label=None,         # (batch_size, num_spans)
+    input_len=None,     # (batch_size)
+    sent_start=None,    # (batch_size)
+    sent_end=None,      # (batch_size)
+    head_mask=None,
+    inputs_embeds=None,
+    output_attentions=None,
+    output_hidden_states=None,
+    return_dict=True,
+):
+    return_dict = return_dict if return_dict is not None else cls.config.use_return_dict
+
+    outputs = cls.base_model(
+        input_ids,
+        attention_mask=attention_mask,
+        token_type_ids=token_type_ids,
+        position_ids=position_ids,
+        head_mask=head_mask,
+        inputs_embeds=inputs_embeds,
+        output_attentions=output_attentions,
+        output_hidden_states=output_hidden_states,
+        return_dict=return_dict,
+    )
+
+    sequence_output = outputs[0]
+    sequence_output = cls.dropout(sequence_output)
+    logits = cls.span(sequence_output, spans)  # (batch_size, num_spans, num_labels)
+
+    total_loss = None
+    if label is not None:
+        loss_fct = SpanV2Loss()
+        total_loss = loss_fct(logits, label, span_mask)
+
+    if not return_dict:
+        output = (logits,) + outputs[2:]
+        return ((total_loss,) + output) if total_loss is not None else output
+
+    return TokenClassifierOutput(
+        loss=total_loss,
+        logits=logits,
+        hidden_states=outputs.hidden_states,
+        attentions=outputs.attentions,
+    )
 
 class BertSpanV2ForNer(BertPreTrainedModel):
 
@@ -145,57 +197,22 @@ class BertSpanV2ForNer(BertPreTrainedModel):
             config.max_span_length, config.width_embedding_dim)
         self.init_weights()
 
-    def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        token_type_ids=None,
-        position_ids=None,
-        spans=None,         # (batch_size, num_spans, 3)
-        span_mask=None,     # (batch_size, num_spans)
-        label=None,         # (batch_size, num_spans)
-        input_len=None,     # (batch_size)
-        sent_start=None,    # (batch_size)
-        sent_end=None,      # (batch_size)
-        head_mask=None,
-        inputs_embeds=None,
-        output_attentions=None,
-        output_hidden_states=None,
-        return_dict=None,
-    ):
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+    def forward(self, *args, **kwargs):
+        return forward(self, *args, **kwargs)
 
-        outputs = self.bert(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
+class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
 
-        sequence_output = outputs[0]
-        sequence_output = self.dropout(sequence_output)
-        logits = self.span(sequence_output, spans)  # (batch_size, num_spans, num_labels)
+    def __init__(self, config):
+        super().__init__(config)
 
-        total_loss = None
-        if label is not None:
-            loss_fct = SpanV2Loss()
-            total_loss = loss_fct(logits, label, span_mask)
+        self.bert = NeZhaModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.span = SpanV2(config.hidden_size, config.num_labels, 
+            config.max_span_length, config.width_embedding_dim)
+        self.init_weights()
 
-        if not return_dict:
-            output = (logits,) + outputs[2:]
-            return ((total_loss,) + output) if total_loss is not None else output
-
-        return TokenClassifierOutput(
-            loss=total_loss,
-            logits=logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
+    def forward(self, *args, **kwargs):
+        return forward(self, *args, **kwargs)
 
 class NerArgumentParser(ArgumentParser):
 
@@ -237,6 +254,7 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--max_span_length", default=10, type=int)
         self.add_argument("--width_embedding_dim", default=150, type=int)
         self.add_argument("--optimizer", default="adamw", type=str)
+        self.add_argument("--augment_context_aware_p", default=None, type=float)
         
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
@@ -346,23 +364,12 @@ class NerProcessor(DataProcessor):
     
     def _create_examples(self, data_dir, data_file, mode):
         raise NotImplementedError()
-    
-    def entities2tags(self, entities, seq_len):
-        ner_tags = ["O"] * seq_len
-        for t, s, e in entities:
-            if s < 0 or s >= seq_len or e < 0 or e >= seq_len \
-                or s > e or ner_tags[s] != "O" or ner_tags[e] != "O":
-                continue
-            ner_tags[s] = f"B-{t}"
-            for i in range(s + 1, e + 1):
-                ner_tags[i] = f"I-{t}"
-        return ner_tags
 
 class CailNerProcessor(NerProcessor):
 
     def get_labels(self):
         return [
-            "X", "O", "[START]", "[END]",
+            "O", # "X", "O", "[START]", "[END]",
         ] + list(LABEL_MEANING_MAP.keys())
     
     def _create_examples(self, data_dir, data_file, mode):
@@ -395,6 +402,7 @@ class NerDataset(torch.utils.data.Dataset):
         example = self.examples[index]
         # preprocessing
         for proc in self.process_pipline:
+            if proc is None: continue
             example = proc(example)
         # convert to features
         return example
@@ -418,6 +426,40 @@ class NerDataset(torch.utils.data.Dataset):
             t = pad_sequence([b[k][0] for b in batch], batch_first=True)
             collated[k] = t
         return collated
+
+class AugmentContextAware:
+
+    def __init__(self, p, min_mlm_span_length, max_mlm_span_length):
+        self.p = p
+        self.min_mlm_span_length = min_mlm_span_length
+        self.max_mlm_span_length = max_mlm_span_length
+
+    def __call__(self, example):
+        id_ = example[1]["id"]
+        tokens = example[1]["tokens"]
+        entities = example[1]["entities"]
+        sent_start = example[1]["sent_start"]
+        sent_end = example[1]["sent_end"]
+
+        entities = sorted(entities, key=lambda x: x[1], reverse=True) # sort by entity start
+        ner_tags = get_ner_tags(entities, len(tokens))
+
+        for label, start, end, span_text in entities:
+            if random.random() < self.p:
+                entity_text_mlm = ["[MASK]"] * random.randint(
+                    self.min_mlm_span_length, self.max_mlm_span_length)
+                tokens = tokens[: start] + entity_text_mlm + tokens[end + 1: ]
+                ner_span_tag = [f"B-{label}"] + [f"I-{label}"] * (len(entity_text_mlm) - 1)
+                ner_tags = ner_tags[: start] + ner_span_tag + ner_tags[end + 1: ]
+        
+        entities_new = [[t, s, e, "".join(tokens[s: e])] for t, s, e in get_entities(ner_tags)]
+        return [example[0], {
+            "id": id_,
+            "tokens": tokens,
+            "entities": entities_new,
+            "sent_start": sent_start,
+            "sent_end": sent_start + len(tokens)
+        }]
 
 class Example2Feature:
     
@@ -772,15 +814,14 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
         for pred_no, (pred, input_len, start, end) in enumerate(zip(
                 preds, batch["input_len"], batch["sent_start"], batch["sent_end"])):
             pred = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in pred if id2label[t] != "O"]
-            pred = processor.entities2tags(pred, input_len - 2)
+            pred = get_ner_tags(pred, input_len - 2)
             y_pred.append(pred[start: end])
 
-        labels = model.span.decode_batch(batch["label"], batch["spans"], batch["span_mask"], 
-            batch["sent_start"], batch["sent_end"], is_logits=False)
+        labels = model.span.decode_batch(batch["label"], batch["spans"], batch["span_mask"], is_logits=False)
         for label_no, (label, input_len, start, end) in enumerate(zip(
                 labels, batch["input_len"], batch["sent_start"], batch["sent_end"])):
             label = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in label if id2label[t] != "O"]
-            label = processor.entities2tags(label, input_len - 2)
+            label = get_ner_tags(label, input_len - 2)
             y_true.append(label[start: end])
 
     results = classification_report(y_true, y_pred, digits=6, output_dict=True, scheme=args.scheme)
@@ -820,7 +861,7 @@ def predict(args, model, processor, tokenizer, prefix=""):
         preds = model.span.decode_batch(logits, batch["spans"], batch["span_mask"])
         pred, input_len = preds[0], batch["input_len"][0]
         pred = [(id2label[t], b, e) for t, b, e in pred if id2label[t] != "O"]
-        pred = processor.entities2tags(pred, input_len - 2), 
+        pred = get_ner_tags(pred, input_len - 2), 
         pred = pred[batch["sent_start"][0]: batch["sent_end"][0]]
         label_entities_map = {label: [] for label in LABEL_MEANING_MAP.keys()}
         for t, b, e in get_entities(pred):
@@ -843,6 +884,7 @@ PROCESSER_CLASS = {
 
 MODEL_CLASSES = {
     "bert_span": (BertConfigSpanV2, BertSpanV2ForNer, BertTokenizer),
+    "nezha_span": (BertConfigSpanV2, NeZhaSpanV2ForNer, BertTokenizer),
 }
 
 def load_dataset(args, processor, tokenizer, data_type='train'):
@@ -858,6 +900,8 @@ def load_dataset(args, processor, tokenizer, data_type='train'):
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
     max_seq_length = args.train_max_seq_length if data_type == 'train' else args.eval_max_seq_length
     return NerDataset(examples, process_pipline=[
+        AugmentContextAware(args.augment_context_aware_p, 2, 30
+            ) if (data_type == 'train' and args.augment_context_aware_p is not None) else None,
         Example2Feature(tokenizer, processor.label2id, max_seq_length, config.max_span_length),
     ])
 
@@ -930,21 +974,21 @@ if __name__ == "__main__":
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
-    config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
-                                          num_labels=num_labels, max_span_length=args.max_span_length,
-                                          cache_dir=args.cache_dir if args.cache_dir else None, )
-    tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
-                                                do_lower_case=args.do_lower_case,
-                                                cache_dir=args.cache_dir if args.cache_dir else None, )
-    model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool(".ckpt" in args.model_name_or_path),
-                                        config=config, cache_dir=args.cache_dir if args.cache_dir else None)
     if args.local_rank == 0:
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
-
-    model.to(args.device)
     logger.info("Training/evaluation parameters %s", args)
+
     # Training
     if args.do_train:
+        config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
+                                            num_labels=num_labels, max_span_length=args.max_span_length,
+                                            cache_dir=args.cache_dir if args.cache_dir else None, )
+        tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
+                                                    do_lower_case=args.do_lower_case,
+                                                    cache_dir=args.cache_dir if args.cache_dir else None, )
+        model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool(".ckpt" in args.model_name_or_path),
+                                            config=config, cache_dir=args.cache_dir if args.cache_dir else None)
+        model.to(args.device)
         global_step, tr_loss = train(args, model, processor, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
     # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
@@ -965,6 +1009,9 @@ if __name__ == "__main__":
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
+        config = config_class.from_pretrained(args.output_dir,
+                                              num_labels=num_labels, max_span_length=args.max_span_length,
+                                              cache_dir=args.cache_dir if args.cache_dir else None, )
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
@@ -988,6 +1035,9 @@ if __name__ == "__main__":
                 writer.write("{} = {}\n".format(key, str(results[key])))
 
     if args.do_predict and args.local_rank in [-1, 0]:
+        config = config_class.from_pretrained(args.output_dir,
+                                              num_labels=num_labels, max_span_length=args.max_span_length,
+                                              cache_dir=args.cache_dir if args.cache_dir else None, )
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         checkpoints = [args.output_dir]
         if args.predict_checkpoints > 0:

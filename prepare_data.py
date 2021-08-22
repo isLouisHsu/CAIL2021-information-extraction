@@ -37,44 +37,7 @@ if __name__ == '__main__':
     logging.info(f"Number of raw samples: {num_samples}")
 
     # context window
-    if args.context_window > 0:
-
-        for i in range(len(raw_samples)):
-            if i == 0: continue
-            text = raw_samples[i]["text"]
-            add_left = (args.context_window-len(text)) // 2
-            add_right = (args.context_window-len(text)) - add_left
-            sent_start, sent_end = raw_samples[i]["sent_start"], raw_samples[i]["sent_end"]
-
-            # add left context
-            j = i - 1
-            while j >= 0 and add_left > 0:
-                context_to_add = raw_samples[j]["text"][-add_left:]
-                text = context_to_add + text
-                add_left -= len(context_to_add)
-                sent_start += len(context_to_add)
-                sent_end += len(context_to_add)
-                j -= 1
-
-            # add right context
-            j = i + 1
-            while j < len(raw_samples) and add_right > 0:
-                context_to_add = raw_samples[j]["text"][:add_right]
-                text = text + context_to_add
-                add_right -= len(context_to_add)
-                j += 1
-            
-            # adjust entities
-            entities = []
-            for label, start, end, span_text in raw_samples[i]["entities"]:
-                start += sent_start; end += sent_start
-                assert text[start: end] == span_text
-                entities.append((label, start, end, span_text))
-            
-            raw_samples[i]["text"] = text
-            raw_samples[i]["sent_start"] = sent_start
-            raw_samples[i]["sent_end"] = sent_end
-            raw_samples[i]["entities"] = entities
+    raw_samples = utils.add_context(raw_samples, args.context_window)
 
     # split
     random.shuffle(raw_samples)

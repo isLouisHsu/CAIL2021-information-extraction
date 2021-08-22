@@ -1,6 +1,7 @@
 *.pyc
 output/*
 cache/*
+tmp/*
 data/ner-*
 .vscode/
 .ipynb_checkpoints/
