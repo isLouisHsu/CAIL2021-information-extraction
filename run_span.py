@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import time
 import json
@@ -11,6 +12,7 @@ from tqdm import tqdm
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import numpy as np
@@ -186,6 +188,39 @@ def forward(
         attentions=outputs.attentions,
     )
 
+def compute_kl_loss(p, q, pad_mask=None):
+    
+    p_loss = F.kl_div(F.log_softmax(p, dim=-1), F.softmax(q, dim=-1), reduction='none')
+    q_loss = F.kl_div(F.log_softmax(q, dim=-1), F.softmax(p, dim=-1), reduction='none')
+    
+    # pad_mask is for seq-level tasks
+    if pad_mask is not None:
+        p_loss.masked_fill_(pad_mask, 0.)
+        q_loss.masked_fill_(pad_mask, 0.)
+
+    # You can choose whether to use function "sum" and "mean" depending on your task
+    p_loss = p_loss.mean()
+    q_loss = q_loss.mean()
+
+    loss = (p_loss + q_loss) / 2
+    return loss
+
+def forward_rdrop(cls, alpha, **kwargs):
+    outputs1 = forward(cls, **kwargs)
+    if outputs1.loss is None or alpha <= 0.: return outputs1
+
+    outputs2 = forward(cls, **kwargs)
+    rdrop_loss = compute_kl_loss(
+        outputs1["logits"], outputs2["logits"], 
+        kwargs["span_mask"].unsqueeze(-1) == 0)
+    total_loss = (outputs1["loss"] + outputs2["loss"]) / 2. + alpha * rdrop_loss
+    return TokenClassifierOutput(
+        loss=total_loss,
+        logits=outputs1["logits"],
+        hidden_states=outputs1.hidden_states,
+        attentions=outputs1.attentions,
+    )
+
 class BertSpanV2ForNer(BertPreTrainedModel):
 
     def __init__(self, config):
@@ -197,8 +232,10 @@ class BertSpanV2ForNer(BertPreTrainedModel):
             config.max_span_length, config.width_embedding_dim)
         self.init_weights()
 
-    def forward(self, *args, **kwargs):
-        return forward(self, *args, **kwargs)
+    def forward(self, **kwargs):
+        if args.rdrop_alpha is not None:
+            return forward_rdrop(self, args.rdrop_alpha, **kwargs)
+        return forward(self, **kwargs)
 
 class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
 
@@ -211,8 +248,10 @@ class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
             config.max_span_length, config.width_embedding_dim)
         self.init_weights()
 
-    def forward(self, *args, **kwargs):
-        return forward(self, *args, **kwargs)
+    def forward(self, **kwargs):
+        if args.rdrop_alpha is not None:
+            return forward_rdrop(self, args.rdrop_alpha, **kwargs)
+        return forward(self, **kwargs)
 
 class NerArgumentParser(ArgumentParser):
 
@@ -255,6 +294,7 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--width_embedding_dim", default=150, type=int)
         self.add_argument("--optimizer", default="adamw", type=str)
         self.add_argument("--augment_context_aware_p", default=None, type=float)
+        self.add_argument("--rdrop_alpha", default=None, type=float)
         
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
@@ -460,6 +500,16 @@ class AugmentContextAware:
             "sent_start": sent_start,
             "sent_end": sent_start + len(tokens)
         }]
+
+# TODO:
+class ReDataMasking:
+
+    def __init__(self):
+        self.nc_reobj = re.compile("(现金)?(人民币)?[0-9]+(.[0-9]+)?余?元(现金)?(人民币)?")
+
+    def __call__(self, example):
+        ...
+
 
 class Example2Feature:
     
@@ -749,10 +799,11 @@ def train(args, model, processor, tokenizer):
                                 torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
                                 torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
                                 logger.info("Saving optimizer and scheduler states to %s", output_dir)
-                if args.local_rank in [-1, 0] and not args.save_best_checkpoints and \
-                    args.save_steps > 0 and global_step % args.save_steps == 0:
+                if args.local_rank in [-1, 0] and \
+                        args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
-                    output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
+                    output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(
+                        global_step if not args.save_best_checkpoints else 999999))
                     if not os.path.exists(output_dir):
                         os.makedirs(output_dir)
                     model_to_save = (
@@ -861,7 +912,7 @@ def predict(args, model, processor, tokenizer, prefix=""):
         preds = model.span.decode_batch(logits, batch["spans"], batch["span_mask"])
         pred, input_len = preds[0], batch["input_len"][0]
         pred = [(id2label[t], b, e) for t, b, e in pred if id2label[t] != "O"]
-        pred = get_ner_tags(pred, input_len - 2), 
+        pred = get_ner_tags(pred, input_len - 2)
         pred = pred[batch["sent_start"][0]: batch["sent_end"][0]]
         label_entities_map = {label: [] for label in LABEL_MEANING_MAP.keys()}
         for t, b, e in get_entities(pred):
@@ -915,7 +966,7 @@ if __name__ == "__main__":
         args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
     else:
         args = parser.build_arguments().parse_args()
-    # args = parser.parse_args_from_json(json_file="args/bert_span-baseline.json")
+    # args = parser.parse_args_from_json(json_file="args/bert_span-alldata_rdrop1.0.json")
 
     # Set seed before initializing model.
     seed_everything(args.seed)

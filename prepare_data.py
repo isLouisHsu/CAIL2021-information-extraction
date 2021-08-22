@@ -15,7 +15,7 @@ if __name__ == '__main__':
         help="Data files.")
     parser.add_argument("--context_window", default=0, type=int, 
         help="Size of context window.")
-    parser.add_argument("--train_split_ratio", default=0.8, type=float, 
+    parser.add_argument("--train_split_ratio", default=1.0, type=float, 
         help="Size of training data.")
     parser.add_argument("--output_dir", type=str, default="./data/")
     parser.add_argument("--seed", default=42, type=int, 
