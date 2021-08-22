@@ -10,7 +10,9 @@ outfile = "/output/output.json"
 def main():
 
     context_window = 510
-    json_file = "./args/bert_span-baseline.json"
+    # json_file = "./args/bert_span-baseline.json"
+    # json_file = "./args/bert_span-alldata.json"
+    json_file = "./args/bert_span-alldata_rdrop1.0.json"
     
     parser = NerArgumentParser()
     args = parser.parse_args_from_json(json_file=json_file)

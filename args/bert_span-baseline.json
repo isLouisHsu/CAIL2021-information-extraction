@@ -15,6 +15,7 @@
     "width_embedding_dim": 128,
     "optimizer": "adamw",
     "augment_context_aware_p": null,
+    "rdrop_alpha": null,
     "scheme": "IOB2",
     "loss_type": "ce",
     "config_name": "",
