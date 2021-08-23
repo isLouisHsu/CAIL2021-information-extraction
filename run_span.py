@@ -287,7 +287,7 @@ class NerArgumentParser(ArgumentParser):
                             help="Model type selected in the list: ")
         self.add_argument("--model_name_or_path", default=None, type=str, required=True,
                             help="Path to pre-trained model or shortcut name selected in the list: " )
-        self.add_argument("--output_dir", default=None, type=str, required=True,
+        self.add_argument("--output_dir", default="output/", type=str, required=False,
                             help="The output directory where the model predictions and checkpoints will be written.", )
         
         self.add_argument("--max_span_length", default=10, type=int)
@@ -305,7 +305,7 @@ class NerArgumentParser(ArgumentParser):
                             help="Pretrained config name or path if not the same as model_name")
         self.add_argument("--tokenizer_name", default="", type=str,
                             help="Pretrained tokenizer name or path if not the same as model_name", )
-        self.add_argument("--cache_dir", default="", type=str,
+        self.add_argument("--cache_dir", default="cache/", type=str,
                             help="Where do you want to store the pre-trained models downloaded from s3", )
         self.add_argument("--train_max_seq_length", default=128, type=int,
                             help="The maximum total input sequence length after tokenization. Sequences longer "
@@ -777,7 +777,7 @@ def train(args, model, processor, tokenizer):
                     if args.local_rank == -1:
                         # Only evaluate when single GPU otherwise metrics may not average well
                         eval_results = evaluate(args, model, processor, tokenizer)
-                        logger.info(f"loss={eval_results.pop('loss')}")
+                        logger.info(f"[{epoch_no}] loss={eval_results.pop('loss')}")
                         for entity, metrics in eval_results.items():
                             logger.info("{:*^50s}".format(entity))
                             logger.info("\t".join(f"{metric:s}={value:f}" 
@@ -793,7 +793,7 @@ def train(args, model, processor, tokenizer):
                                     model.module if hasattr(model, "module") else model
                                 )  # Take care of distributed/parallel training
                                 model_to_save.save_pretrained(output_dir)
-                                torch.save(args, os.path.join(output_dir, "training_args.json"))
+                                torch.save(args, os.path.join(output_dir, "training_args.bin"))
                                 logger.info("Saving model checkpoint to %s", output_dir)
                                 tokenizer.save_vocabulary(output_dir)
                                 torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
@@ -810,7 +810,7 @@ def train(args, model, processor, tokenizer):
                         model.module if hasattr(model, "module") else model
                     )  # Take care of distributed/parallel training
                     model_to_save.save_pretrained(output_dir)
-                    torch.save(args, os.path.join(output_dir, "training_args.json"))
+                    torch.save(args, os.path.join(output_dir, "training_args.bin"))
                     logger.info("Saving model checkpoint to %s", output_dir)
                     tokenizer.save_vocabulary(output_dir)
                     torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
@@ -974,11 +974,12 @@ if __name__ == "__main__":
     # User-defined post initialization
     output_dir = f"{args.task_name}-{args.dataset_name}-{args.model_type}-{args.version}-{args.seed}"
     if not args.output_dir.endswith(output_dir):
-        args.output_dir = os.path.join(args.output_dir, output_dir)
+        output_dir = os.path.join(args.output_dir, output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+        parser.save_args_to_json(os.path.join(output_dir, "training_args.json"), args)
+        args.output_dir = output_dir
     args.logging_dir = args.output_dir
-    os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.cache_dir, exist_ok=True)
-    parser.save_args_to_json(os.path.join(args.output_dir, "training_args.json"), args)
 
     # Setup logging
     time_ = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime())

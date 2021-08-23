@@ -10,9 +10,7 @@ outfile = "/output/output.json"
 def main():
 
     context_window = 510
-    # json_file = "./args/bert_span-baseline.json"
-    # json_file = "./args/bert_span-alldata.json"
-    json_file = "./args/bert_span-alldata_rdrop1.0.json"
+    json_file = "output/ner-cail_ner-bert_span-baseline-42/training_args.json"
     
     parser = NerArgumentParser()
     args = parser.parse_args_from_json(json_file=json_file)
@@ -21,6 +19,7 @@ def main():
     args.do_eval = False
     args.do_test = True
     args.per_gpu_eval_batch_size = 1
+    args.fp16 = False
     parser.save_args_to_json("./args/pred.json", args)
     
     version = args.version
