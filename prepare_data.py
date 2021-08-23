@@ -59,3 +59,4 @@ if __name__ == '__main__':
         dev_samples = [raw_samples[idx] for idx in dev_index]
         utils.save_samples(os.path.join(args.output_dir, f"train_{k}.json"), train_samples)
         utils.save_samples(os.path.join(args.output_dir, f"dev_{k}.json"), dev_samples)
+        # TODO: generate ground truth file for dev

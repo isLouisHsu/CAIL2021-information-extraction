@@ -293,6 +293,7 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--max_span_length", default=10, type=int)
         self.add_argument("--width_embedding_dim", default=150, type=int)
         self.add_argument("--optimizer", default="adamw", type=str)
+        self.add_argument("--context_window", default=0, type=int)
         self.add_argument("--augment_context_aware_p", default=None, type=float)
         self.add_argument("--rdrop_alpha", default=None, type=float)
         

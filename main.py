@@ -9,8 +9,8 @@ outfile = "/output/output.json"
 
 def main():
 
-    context_window = 510
-    json_file = "output/ner-cail_ner-bert_span-baseline-42/training_args.json"
+    # json_file = "output/ner-cail_ner-bert_span-baseline-42/training_args.json"
+    json_file = "output/ner-cail_ner-nezha_span-nezha-42/training_args.json"
     
     parser = NerArgumentParser()
     args = parser.parse_args_from_json(json_file=json_file)
@@ -26,12 +26,14 @@ def main():
     data_dir = args.data_dir
     model_type = args.model_type
     dataset_name = args.dataset_name
+    # context_window = args.context_window
+    context_window = 0
     seed = args.seed
 
     # upload
     raw_samples = utils.load_raw(infile)
     raw_samples = utils.add_context(raw_samples, context_window)
-    utils.save_samples(os.path.join(data_dir, "test.json"), raw_samples)
+    utils.save_samples(os.path.join(data_dir, args.test_file), raw_samples)
     
     os.system(f"sudo /home/user/miniconda/bin/python3 run_span.py ./args/pred.json")
     os.system(f"sudo cp ./output/ner-{dataset_name}-{model_type}-{version}-{seed}/test_prediction.json {outfile}")
