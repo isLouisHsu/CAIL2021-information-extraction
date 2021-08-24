@@ -233,8 +233,8 @@ class BertSpanV2ForNer(BertPreTrainedModel):
         self.init_weights()
 
     def forward(self, **kwargs):
-        if args.rdrop_alpha is not None:
-            return forward_rdrop(self, args.rdrop_alpha, **kwargs)
+        # if args.rdrop_alpha is not None:
+        #     return forward_rdrop(self, args.rdrop_alpha, **kwargs)
         return forward(self, **kwargs)
 
 class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
@@ -249,8 +249,8 @@ class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
         self.init_weights()
 
     def forward(self, **kwargs):
-        if args.rdrop_alpha is not None:
-            return forward_rdrop(self, args.rdrop_alpha, **kwargs)
+        # if args.rdrop_alpha is not None:
+        #     return forward_rdrop(self, args.rdrop_alpha, **kwargs)
         return forward(self, **kwargs)
 
 class NerArgumentParser(ArgumentParser):
@@ -293,9 +293,9 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--max_span_length", default=10, type=int)
         self.add_argument("--width_embedding_dim", default=150, type=int)
         self.add_argument("--optimizer", default="adamw", type=str)
-        self.add_argument("--context_window", default=0, type=int)
-        self.add_argument("--augment_context_aware_p", default=None, type=float)
-        self.add_argument("--rdrop_alpha", default=None, type=float)
+        # self.add_argument("--context_window", default=0, type=int)
+        # self.add_argument("--augment_context_aware_p", default=None, type=float)
+        # self.add_argument("--rdrop_alpha", default=None, type=float)
         
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
@@ -443,7 +443,6 @@ class NerDataset(torch.utils.data.Dataset):
         example = self.examples[index]
         # preprocessing
         for proc in self.process_pipline:
-            if proc is None: continue
             example = proc(example)
         # convert to features
         return example
@@ -468,39 +467,39 @@ class NerDataset(torch.utils.data.Dataset):
             collated[k] = t
         return collated
 
-class AugmentContextAware:
+# class AugmentContextAware:
 
-    def __init__(self, p, min_mlm_span_length, max_mlm_span_length):
-        self.p = p
-        self.min_mlm_span_length = min_mlm_span_length
-        self.max_mlm_span_length = max_mlm_span_length
+#     def __init__(self, p, min_mlm_span_length, max_mlm_span_length):
+#         self.p = p
+#         self.min_mlm_span_length = min_mlm_span_length
+#         self.max_mlm_span_length = max_mlm_span_length
 
-    def __call__(self, example):
-        id_ = example[1]["id"]
-        tokens = example[1]["tokens"]
-        entities = example[1]["entities"]
-        sent_start = example[1]["sent_start"]
-        sent_end = example[1]["sent_end"]
+#     def __call__(self, example):
+#         id_ = example[1]["id"]
+#         tokens = example[1]["tokens"]
+#         entities = example[1]["entities"]
+#         sent_start = example[1]["sent_start"]
+#         sent_end = example[1]["sent_end"]
 
-        entities = sorted(entities, key=lambda x: x[1], reverse=True) # sort by entity start
-        ner_tags = get_ner_tags(entities, len(tokens))
+#         entities = sorted(entities, key=lambda x: x[1], reverse=True) # sort by entity start
+#         ner_tags = get_ner_tags(entities, len(tokens))
 
-        for label, start, end, span_text in entities:
-            if random.random() < self.p:
-                entity_text_mlm = ["[MASK]"] * random.randint(
-                    self.min_mlm_span_length, self.max_mlm_span_length)
-                tokens = tokens[: start] + entity_text_mlm + tokens[end + 1: ]
-                ner_span_tag = [f"B-{label}"] + [f"I-{label}"] * (len(entity_text_mlm) - 1)
-                ner_tags = ner_tags[: start] + ner_span_tag + ner_tags[end + 1: ]
+#         for label, start, end, span_text in entities:
+#             if random.random() < self.p:
+#                 entity_text_mlm = ["[MASK]"] * random.randint(
+#                     self.min_mlm_span_length, self.max_mlm_span_length)
+#                 tokens = tokens[: start] + entity_text_mlm + tokens[end + 1: ]
+#                 ner_span_tag = [f"B-{label}"] + [f"I-{label}"] * (len(entity_text_mlm) - 1)
+#                 ner_tags = ner_tags[: start] + ner_span_tag + ner_tags[end + 1: ]
         
-        entities_new = [[t, s, e, "".join(tokens[s: e])] for t, s, e in get_entities(ner_tags)]
-        return [example[0], {
-            "id": id_,
-            "tokens": tokens,
-            "entities": entities_new,
-            "sent_start": sent_start,
-            "sent_end": sent_start + len(tokens)
-        }]
+#         entities_new = [[t, s, e, "".join(tokens[s: e])] for t, s, e in get_entities(ner_tags)]
+#         return [example[0], {
+#             "id": id_,
+#             "tokens": tokens,
+#             "entities": entities_new,
+#             "sent_start": sent_start,
+#             "sent_end": sent_start + len(tokens)
+#         }]
 
 # TODO:
 class ReDataMasking:
@@ -917,7 +916,7 @@ def predict(args, model, processor, tokenizer, prefix=""):
         pred = pred[batch["sent_start"][0]: batch["sent_end"][0]]
         label_entities_map = {label: [] for label in LABEL_MEANING_MAP.keys()}
         for t, b, e in get_entities(pred):
-            label_entities_map[t].append(f"{b};{e}")
+            label_entities_map[t].append(f"{b};{e+1}")
         entities = [{"label": label, "span": label_entities_map[label]} for label in LABEL_MEANING_MAP.keys()]
         # 预测结果文件为一个json格式的文件，包含两个字段，分别为``id``和``entities``
         results.append({
@@ -936,7 +935,7 @@ PROCESSER_CLASS = {
 
 MODEL_CLASSES = {
     "bert_span": (BertConfigSpanV2, BertSpanV2ForNer, BertTokenizer),
-    "nezha_span": (BertConfigSpanV2, NeZhaSpanV2ForNer, BertTokenizer),
+    # "nezha_span": (BertConfigSpanV2, NeZhaSpanV2ForNer, BertTokenizer),
 }
 
 def load_dataset(args, processor, tokenizer, data_type='train'):
@@ -952,8 +951,8 @@ def load_dataset(args, processor, tokenizer, data_type='train'):
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
     max_seq_length = args.train_max_seq_length if data_type == 'train' else args.eval_max_seq_length
     return NerDataset(examples, process_pipline=[
-        AugmentContextAware(args.augment_context_aware_p, 2, 30
-            ) if (data_type == 'train' and args.augment_context_aware_p is not None) else None,
+        # AugmentContextAware(args.augment_context_aware_p, 2, 30
+        #     ) if (data_type == 'train' and args.augment_context_aware_p is not None) else None,
         Example2Feature(tokenizer, processor.label2id, max_seq_length, config.max_span_length),
     ])
 
@@ -967,7 +966,7 @@ if __name__ == "__main__":
         args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
     else:
         args = parser.build_arguments().parse_args()
-    # args = parser.parse_args_from_json(json_file="args/bert_span-alldata_rdrop1.0.json")
+    # args = parser.parse_args_from_json(json_file="args/bert_span-baseline.json")
 
     # Set seed before initializing model.
     seed_everything(args.seed)
@@ -1027,10 +1026,7 @@ if __name__ == "__main__":
         torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
     args.model_type = args.model_type.lower()
     config_class, model_class, tokenizer_class = MODEL_CLASSES[args.model_type]
-    if args.local_rank == 0:
-        torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
     logger.info("Training/evaluation parameters %s", args)
-
     # Training
     if args.do_train:
         config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
@@ -1041,6 +1037,8 @@ if __name__ == "__main__":
                                                     cache_dir=args.cache_dir if args.cache_dir else None, )
         model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool(".ckpt" in args.model_name_or_path),
                                             config=config, cache_dir=args.cache_dir if args.cache_dir else None)
+        if args.local_rank == 0:
+            torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
         model.to(args.device)
         global_step, tr_loss = train(args, model, processor, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)

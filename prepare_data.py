@@ -5,7 +5,6 @@ import utils
 import random
 import logging
 from argparse import ArgumentParser
-from sklearn.model_selection import KFold
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -16,7 +15,8 @@ if __name__ == '__main__':
         help="Data files.")
     parser.add_argument("--context_window", default=0, type=int, 
         help="Size of context window.")
-    parser.add_argument("--n_splits", default=5, type=int)
+    parser.add_argument("--train_split_ratio", default=0.8, type=float, 
+        help="Size of training data.")
     parser.add_argument("--output_dir", type=str, default="./data/")
     parser.add_argument("--seed", default=42, type=int, 
         help="Seed.")
@@ -24,11 +24,10 @@ if __name__ == '__main__':
 
     # prepare
     utils.seed_everything(args.seed)
-    args.output_dir = os.path.join(args.output_dir,
-        f"ner-ctx{args.context_window}-{args.n_splits}fold-seed{args.seed}")
+    args.output_dir = os.path.join(args.output_dir, 
+        f"ner-ctx{args.context_window}-train{args.train_split_ratio}-seed{args.seed}")
     os.makedirs(args.output_dir, exist_ok=True)
     logging.info(f"Saving to {args.output_dir}")
-
     # load raw
     raw_samples = []
     for data_file in args.data_files:
@@ -38,25 +37,53 @@ if __name__ == '__main__':
     logging.info(f"Number of raw samples: {num_samples}")
 
     # context window
-    raw_samples = utils.add_context(raw_samples, args.context_window)
+    if args.context_window > 0:
 
-    # # split
-    # random.shuffle(raw_samples)
-    # num_train = int(num_samples * args.train_split_ratio)
-    # num_dev = num_samples - num_train
-    # train_samples = raw_samples[: num_train]
-    # dev_samples = raw_samples[num_train:]
-    # logging.info(f"Number of training data: {num_train}, number of dev data: {num_dev}")
+        for i in range(len(raw_samples)):
+            if i == 0: continue
+            text = raw_samples[i]["text"]
+            add_left = (args.context_window-len(text)) // 2
+            add_right = (args.context_window-len(text)) - add_left
+            sent_start, sent_end = raw_samples[i]["sent_start"], raw_samples[i]["sent_end"]
 
-    # # save samples
-    # utils.save_samples(os.path.join(args.output_dir, "train.json"), train_samples)
-    # utils.save_samples(os.path.join(args.output_dir, "dev.json"), dev_samples)
+            # add left context
+            j = i - 1
+            while j >= 0 and add_left > 0:
+                context_to_add = raw_samples[j]["text"][-add_left:]
+                text = context_to_add + text
+                add_left -= len(context_to_add)
+                sent_start += len(context_to_add)
+                sent_end += len(context_to_add)
+                j -= 1
 
-    # k-fold split
-    kf = KFold(n_splits=args.n_splits, shuffle=True)
-    for k, (train_index, dev_index) in enumerate(kf.split(raw_samples)):
-        train_samples = [raw_samples[idx] for idx in train_index]
-        dev_samples = [raw_samples[idx] for idx in dev_index]
-        utils.save_samples(os.path.join(args.output_dir, f"train_{k}.json"), train_samples)
-        utils.save_samples(os.path.join(args.output_dir, f"dev_{k}.json"), dev_samples)
-        # TODO: generate ground truth file for dev
+            # add right context
+            j = i + 1
+            while j < len(raw_samples) and add_right > 0:
+                context_to_add = raw_samples[j]["text"][:add_right]
+                text = text + context_to_add
+                add_right -= len(context_to_add)
+                j += 1
+            
+            # adjust entities
+            entities = []
+            for label, start, end, span_text in raw_samples[i]["entities"]:
+                start += sent_start; end += sent_start
+                assert text[start: end] == span_text
+                entities.append((label, start, end, span_text))
+            
+            raw_samples[i]["text"] = text
+            raw_samples[i]["sent_start"] = sent_start
+            raw_samples[i]["sent_end"] = sent_end
+            raw_samples[i]["entities"] = entities
+
+    # split
+    random.shuffle(raw_samples)
+    num_train = int(num_samples * args.train_split_ratio)
+    num_dev = num_samples - num_train
+    train_samples = raw_samples[: num_train]
+    dev_samples = raw_samples[num_train:]
+    logging.info(f"Number of training data: {num_train}, number of dev data: {num_dev}")
+
+    # save samples
+    utils.save_samples(os.path.join(args.output_dir, "train.json"), train_samples)
+    utils.save_samples(os.path.join(args.output_dir, "dev.json"), dev_samples)
