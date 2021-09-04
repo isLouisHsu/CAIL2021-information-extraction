@@ -270,13 +270,13 @@ class NerArgumentParser(ArgumentParser):
         # Required parameters
         self.add_argument("--version", default=None, type=str, required=True,
                             help="Version of training model.")
-        self.add_argument("--device", default=None, type=str, required=True,
+        self.add_argument("--device", default=None, type=str, required=False,
                             help="Device for training.")
-        self.add_argument("--n_gpu", default=1, type=int, required=True,
+        self.add_argument("--n_gpu", default=1, type=int, required=False,
                             help="Device for training.")
-        self.add_argument("--task_name", default=None, type=str, required=True,
+        self.add_argument("--task_name", default="ner", type=str, required=False,
                             help="The name of the task to train selected in the list: ")
-        self.add_argument("--dataset_name", default=None, type=str, required=True,
+        self.add_argument("--dataset_name", default="cail_ner", type=str, required=False,
                             help="The name of the dataset for the task")
         self.add_argument("--data_dir", default=None, type=str, required=True,
                             help="The input data dir. Should contain the training files for the CoNLL-2003 NER task.", )
@@ -290,8 +290,8 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--output_dir", default="output/", type=str, required=False,
                             help="The output directory where the model predictions and checkpoints will be written.", )
         
-        self.add_argument("--max_span_length", default=10, type=int)
-        self.add_argument("--width_embedding_dim", default=150, type=int)
+        self.add_argument("--max_span_length", default=50, type=int)
+        self.add_argument("--width_embedding_dim", default=128, type=int)
         self.add_argument("--optimizer", default="adamw", type=str)
         # self.add_argument("--context_window", default=0, type=int)
         # self.add_argument("--augment_context_aware_p", default=None, type=float)
@@ -991,17 +991,17 @@ if __name__ == "__main__":
     )
     logger.info(f"Training/evaluation parameters {args}")
 
-    # # Setup CUDA, GPU & distributed training
-    # if args.local_rank == -1 or args.no_cuda:
-    #     device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-    #     args.n_gpu = torch.cuda.device_count()
-    # else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-    #     torch.cuda.set_device(args.local_rank)
-    #     device = torch.device("cuda", args.local_rank)
-    #     torch.distributed.init_process_group(backend="nccl")
-    #     args.n_gpu = 1
-    # args.device = device
-    args.device, args.n_gpu = torch.device(args.device), 1
+    # Setup CUDA, GPU & distributed training
+    if args.local_rank == -1 or args.no_cuda:
+        device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
+        args.n_gpu = torch.cuda.device_count()
+    else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
+        torch.cuda.set_device(args.local_rank)
+        device = torch.device("cuda", args.local_rank)
+        torch.distributed.init_process_group(backend="nccl")
+        args.n_gpu = 1
+    args.device = device
+    # args.device, args.n_gpu = torch.device(args.device), 1
 
     logger.warning(
         "Process rank: %s, device: %s, n_gpu: %s, distributed training: %s, 16-bits training: %s",

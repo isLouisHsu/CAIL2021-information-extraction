@@ -5,6 +5,8 @@ import utils
 import random
 import logging
 from argparse import ArgumentParser
+from sklearn.model_selection import KFold
+
 
 logging.getLogger().setLevel(logging.INFO)
 
@@ -17,6 +19,7 @@ if __name__ == '__main__':
         help="Size of context window.")
     parser.add_argument("--train_split_ratio", default=0.8, type=float, 
         help="Size of training data.")
+    parser.add_argument("--n_splits", default=5, type=int, help="For k-fold")
     parser.add_argument("--output_dir", type=str, default="./data/")
     parser.add_argument("--seed", default=42, type=int, 
         help="Seed.")
@@ -24,8 +27,10 @@ if __name__ == '__main__':
 
     # prepare
     utils.seed_everything(args.seed)
+    # args.output_dir = os.path.join(args.output_dir, 
+    #     f"ner-ctx{args.context_window}-train{args.train_split_ratio}-seed{args.seed}")
     args.output_dir = os.path.join(args.output_dir, 
-        f"ner-ctx{args.context_window}-train{args.train_split_ratio}-seed{args.seed}")
+        f"ner-ctx{args.context_window}-{args.n_splits}fold-seed{args.seed}")
     os.makedirs(args.output_dir, exist_ok=True)
     logging.info(f"Saving to {args.output_dir}")
     # load raw
@@ -76,14 +81,39 @@ if __name__ == '__main__':
             raw_samples[i]["sent_end"] = sent_end
             raw_samples[i]["entities"] = entities
 
-    # split
-    random.shuffle(raw_samples)
-    num_train = int(num_samples * args.train_split_ratio)
-    num_dev = num_samples - num_train
-    train_samples = raw_samples[: num_train]
-    dev_samples = raw_samples[num_train:]
-    logging.info(f"Number of training data: {num_train}, number of dev data: {num_dev}")
+    # # split
+    # random.shuffle(raw_samples)
+    # num_train = int(num_samples * args.train_split_ratio)
+    # num_dev = num_samples - num_train
+    # train_samples = raw_samples[: num_train]
+    # dev_samples = raw_samples[num_train:]
+    # logging.info(f"Number of training data: {num_train}, number of dev data: {num_dev}")
 
-    # save samples
-    utils.save_samples(os.path.join(args.output_dir, "train.json"), train_samples)
-    utils.save_samples(os.path.join(args.output_dir, "dev.json"), dev_samples)
+    # # save samples
+    # utils.save_samples(os.path.join(args.output_dir, "train.json"), train_samples)
+    # utils.save_samples(os.path.join(args.output_dir, "dev.json"), dev_samples)
+
+    # k-fold
+    kf = KFold(n_splits=args.n_splits)
+    for fold_no, (train_index, dev_index) in enumerate(kf.split(raw_samples)):
+        train_samples = [raw_samples[index] for index in train_index]
+        dev_samples = [raw_samples[index] for index in dev_index]
+        utils.save_samples(os.path.join(args.output_dir, f"train.{fold_no}.json"), train_samples)
+        utils.save_samples(os.path.join(args.output_dir, f"dev.{fold_no}.json"), dev_samples)
+        logging.info(f"Fold[{fold_no}/{args.n_splits}] Number of training data: {len(train_samples)}, number of dev data: {len(dev_samples)}")
+
+        # dev groundtruth
+        dev_groundtruths = []
+        for sample in dev_samples:
+            label_entities_map = {label: [] for label in utils.LABEL_MEANING_MAP.keys()}
+            for t, b, e, _ in sample["entities"]:
+                label_entities_map[t].append(f"{b};{e+1}")
+            entities = [{"label": label, "span": label_entities_map[label]} for label in utils.LABEL_MEANING_MAP.keys()]
+            dev_groundtruths.append({
+                "id": sample["id"],
+                "entities": entities,
+                "text": sample["text"],
+            })
+        with open(os.path.join(args.output_dir, f"dev.gt.{fold_no}.json"), "w") as f:
+            for gt in dev_groundtruths:
+                f.write(json.dumps(gt, ensure_ascii=False) + "\n")
