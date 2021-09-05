@@ -60,7 +60,7 @@ def get_scores(ground_truth_path, output_path):
             data.pop('id')
             prediction[id] = data
     scores = dict()
-    scores["总计"] = score(ground_truth, prediction)
+    scores["avg"] = score(ground_truth, prediction)
     for label in LABEL_MEANING_MAP.keys():
         scores[label] = score(ground_truth, prediction, [label])
     return scores
@@ -156,11 +156,11 @@ if __name__ == '__main__':
 
     # for label, score in get_scores(
     #     "./data/ner-ctx0-5fold-seed42/dev.gt.0.json", 
-    #     "output/ner-cail_ner-bert_span-baseline-42/test_prediction.json"
+    #     "output/ner-cail_ner-bert_span-baseline-fold0-42/test_prediction.json"
     # ).items():
     #     print(LABEL_MEANING_MAP.get(label, label))
     #     print(score)
     # analyze_error(
     #     "./data/ner-ctx0-5fold-seed42/dev.gt.0.json", 
-    #     "output/ner-cail_ner-bert_span-baseline-42/test_prediction.json"
+    #     "output/ner-cail_ner-bert_span-baseline-fold0-42/test_prediction.json"
     # )
