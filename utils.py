@@ -3,6 +3,7 @@ import json
 import torch
 import random
 import numpy as np
+from collections import Counter
 
 def seed_everything(seed=None, reproducibility=True):
     '''
@@ -63,6 +64,14 @@ def load_raw(filepath):
                         ))
             raw.append(r)
     return raw
+
+def count_entity_labels(samples):
+    labels = []
+    for sample in samples:
+        for label, *other in sample["entities"]:
+            labels.append(LABEL_MEANING_MAP[label])
+    counter = Counter(labels)
+    return counter
 
 def save_samples(filename, samples):
     with open(filename, "w") as f:

@@ -1,4 +1,6 @@
 *.pyc
+output.json
+args/pred*
 output/*
 cache/*
 tmp/*

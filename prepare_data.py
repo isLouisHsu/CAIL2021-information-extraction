@@ -98,9 +98,15 @@ if __name__ == '__main__':
     for fold_no, (train_index, dev_index) in enumerate(kf.split(raw_samples)):
         train_samples = [raw_samples[index] for index in train_index]
         dev_samples = [raw_samples[index] for index in dev_index]
+        dev_samples = sorted(dev_samples, key=lambda x: x["id"])
         utils.save_samples(os.path.join(args.output_dir, f"train.{fold_no}.json"), train_samples)
         utils.save_samples(os.path.join(args.output_dir, f"dev.{fold_no}.json"), dev_samples)
         logging.info(f"Fold[{fold_no}/{args.n_splits}] Number of training data: {len(train_samples)}, number of dev data: {len(dev_samples)}")
+
+        train_label_counter = utils.count_entity_labels(train_samples)
+        dev_label_counter = utils.count_entity_labels(dev_samples)
+        logging.info(f"{train_label_counter}")
+        logging.info(f"{dev_label_counter}")
 
         # dev groundtruth
         dev_groundtruths = []

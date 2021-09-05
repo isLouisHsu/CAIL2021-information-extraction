@@ -44,6 +44,7 @@ from seqeval.metrics.sequence_labeling import (
     f1_score, precision_score, recall_score,
     get_entities
 )
+from evaluate import score
 from utils import LABEL_MEANING_MAP, get_ner_tags
 
 class BertConfigSpanV2(BertConfig):
@@ -95,8 +96,9 @@ class SpanV2(nn.Module):
 
         logits = self.classifier(spans_embedding)
         return logits
-        
-    def decode_batch(self,
+    
+    @staticmethod
+    def decode_batch(
         batch,      # (batch_size, num_spans, num_labels)
         spans,      # (batch_size, num_spans, 3)
         span_mask,  # (batch_size, num_spans)
@@ -766,8 +768,8 @@ def train(args, model, processor, tokenizer):
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
                 else:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                scheduler.step()  # Update learning rate schedule
                 optimizer.step()
+                scheduler.step()  # Update learning rate schedule
                 model.zero_grad()
                 global_step += 1
                 if args.local_rank in [-1, 0] and args.evaluate_during_training and \
@@ -783,8 +785,8 @@ def train(args, model, processor, tokenizer):
                             logger.info("\t".join(f"{metric:s}={value:f}" 
                                 for metric, value in metrics.items()))
                         if args.save_best_checkpoints:
-                            if eval_results["micro avg"]["f1-score"] > best_f1:
-                                best_f1 = eval_results["micro avg"]["f1-score"]
+                            if eval_results["avg"]["f"] > best_f1:
+                                best_f1 = eval_results["avg"]["f"]
                                 # Save model checkpoint
                                 output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(999999))
                                 if not os.path.exists(output_dir):
@@ -861,23 +863,54 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
         nb_eval_steps += 1
         
         # calculate metrics
-        preds = model.span.decode_batch(logits, batch["spans"], batch["span_mask"])
+        preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"])
         for pred_no, (pred, input_len, start, end) in enumerate(zip(
                 preds, batch["input_len"], batch["sent_start"], batch["sent_end"])):
             pred = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in pred if id2label[t] != "O"]
-            pred = get_ner_tags(pred, input_len - 2)
-            y_pred.append(pred[start: end])
+            pred = [(t, b - start, e - start) for t, b, e in pred]
+            sample = eval_dataset.examples[args.eval_batch_size * step + pred_no][1]
+            label_entities_map = {v: [] for v in LABEL_MEANING_MAP.values()}
+            for t, b, e in pred:
+                label_entities_map[t].append(f"{b};{e+1}")
+            entities = [{"label": k, "span": v} for k, v in label_entities_map.items()]
+            y_pred.append({"id": sample["id"].split("-")[-1], "entities": entities})
 
-        labels = model.span.decode_batch(batch["label"], batch["spans"], batch["span_mask"], is_logits=False)
+        labels = SpanV2.decode_batch(batch["label"], batch["spans"], batch["span_mask"], is_logits=False)
         for label_no, (label, input_len, start, end) in enumerate(zip(
                 labels, batch["input_len"], batch["sent_start"], batch["sent_end"])):
             label = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in label if id2label[t] != "O"]
-            label = get_ner_tags(label, input_len - 2)
-            y_true.append(label[start: end])
+            label = [(t, b - start, e - start) for t, b, e in label]
+            sample = eval_dataset.examples[args.eval_batch_size * step + label_no][1]
+            label_entities_map = {v: [] for v in LABEL_MEANING_MAP.values()}
+            for t, b, e in label:
+                label_entities_map[t].append(f"{b};{e+1}")
+            entities = [{"label": k, "span": v} for k, v in label_entities_map.items()]
+            y_true.append({"id": sample["id"].split("-")[-1], "entities": entities})
 
-    results = classification_report(y_true, y_pred, digits=6, output_dict=True, scheme=args.scheme)
+    y_true = {y["id"]: {"entities": y["entities"]} for y in y_true}
+    y_pred = {y["id"]: {"entities": y["entities"]} for y in y_pred}
+    results = dict()
+    results["avg"] = score(y_true, y_pred)
+    for label in LABEL_MEANING_MAP.values():
+        results[label] = score(y_true, y_pred, [label])
     results['loss'] = eval_loss / nb_eval_steps
     return results
+    
+def predict_decode_batch(example, batch, id2label):
+    logits = batch["logits"]
+    preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"])
+    pred, input_len = preds[0], batch["input_len"][0]
+    start, end = batch["sent_start"].item(), batch["sent_end"].item()
+    pred = [(id2label[t], b, e) for t, b, e in pred if id2label[t] != "O"]
+    pred = [(t, b - start, e - start) for t, b, e in pred]
+    label_entities_map = {label: [] for label in LABEL_MEANING_MAP.keys()}
+    for t, b, e in pred:
+        label_entities_map[t].append(f"{b};{e+1}")
+    entities = [{"label": label, "span": label_entities_map[label]} \
+        for label in LABEL_MEANING_MAP.keys()]
+    # 预测结果文件为一个json格式的文件，包含两个字段，分别为``id``和``entities``
+    id_ = example["id"].split("-")[1]
+    return {"id": id_, "entities": entities}
 
 def predict(args, model, processor, tokenizer, prefix=""):
     pred_output_dir = args.output_dir
@@ -898,6 +931,7 @@ def predict(args, model, processor, tokenizer, prefix=""):
     if isinstance(model, nn.DataParallel):
         model = model.module
     pbar = tqdm(enumerate(test_dataloader), total=len(test_dataloader), desc="Predicting...")
+    batch_all = []
     for step, batch in pbar:
         model.eval()
         with torch.no_grad():
@@ -907,27 +941,23 @@ def predict(args, model, processor, tokenizer, prefix=""):
                 if args.model_type.split('_')[0] in ["roberta", "xlnet"]:
                     batch["token_type_ids"] = None
             outputs = model(**batch)
-            logits = outputs['logits']
-
-        preds = model.span.decode_batch(logits, batch["spans"], batch["span_mask"])
-        pred, input_len = preds[0], batch["input_len"][0]
-        pred = [(id2label[t], b, e) for t, b, e in pred if id2label[t] != "O"]
-        pred = get_ner_tags(pred, input_len - 2)
-        pred = pred[batch["sent_start"][0]: batch["sent_end"][0]]
-        label_entities_map = {label: [] for label in LABEL_MEANING_MAP.keys()}
-        for t, b, e in get_entities(pred):
-            label_entities_map[t].append(f"{b};{e+1}")
-        entities = [{"label": label, "span": label_entities_map[label]} for label in LABEL_MEANING_MAP.keys()]
-        # 预测结果文件为一个json格式的文件，包含两个字段，分别为``id``和``entities``
-        results.append({
-            "id": test_dataset.examples[step][1]["id"].split("-")[1],
-            "entities": entities,
-        })
-    
+            logits = outputs['logits']      # (batch_size=1, num_spans, num_labels)
+            batch["logits"] = logits.detach()
+            batch.pop("input_ids")
+            batch.pop("attention_mask")
+            batch.pop("token_type_ids")
+        # 解码输出
+        example = test_dataset.examples[step][1]
+        results.append(predict_decode_batch(example, batch, id2label))
+        # for k-fold
+        batch_all.append({k: v.detach().cpu() for k, v in batch.items()})
     logger.info("\n")
     with open(output_predict_file, "w") as writer:
         for record in results:
             writer.write(json.dumps(record) + '\n')
+    # for k-fold
+    torch.save(batch_all, os.path.join(args.output_dir, "test_batches.pkl"))
+    torch.save(test_dataset.examples, os.path.join(args.output_dir, "test_examples.pkl"))
 
 PROCESSER_CLASS = {
     "cail_ner": CailNerProcessor,
@@ -966,7 +996,7 @@ if __name__ == "__main__":
         args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
     else:
         args = parser.build_arguments().parse_args()
-    # args = parser.parse_args_from_json(json_file="args/bert_span-baseline.json")
+    # args = parser.parse_args_from_json(json_file="args/bert_span-baseline-fold0.json")
 
     # Set seed before initializing model.
     seed_everything(args.seed)
