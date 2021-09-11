@@ -39,6 +39,7 @@ LABEL_MEANING_MAP = {
     "NS": "地点",
     "NO": "组织机构",
 }
+MEANING_LABEL_MAP = {v: k for k, v in LABEL_MEANING_MAP.items()}
 
 def load_raw(filepath):
     raw = []

@@ -10,7 +10,7 @@ infile = "/input/input.json"
 outfile = "/output/output.json"
 
 def main():
-    local_debug = True
+    local_debug = False
     version = "baseline"
     model_type = "bert_span"
     dataset_name = "cail_ner"
@@ -63,6 +63,9 @@ def main():
     with open(output_predict_file, "w") as writer:
         for record in results:
             writer.write(json.dumps(record) + '\n')
+    
+    if local_debug:
+        os.system("python evaluate.py data/ner-ctx0-5fold-seed42/dev.gt.0.json output.json")
 
 if __name__ == '__main__':
     main()
