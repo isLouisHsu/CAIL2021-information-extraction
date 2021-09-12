@@ -61,12 +61,12 @@
 # # <<< 第一阶段 <<<
 
 # >>> 第二阶段 >>>
-# python prepare_data.py \
-#     --data_files ./data/信息抽取_第二阶段/xxcq_mid.json \
-#     --context_window 0 \
-#     --n_splits 5 \
-#     --output_dir data/ \
-#     --seed 42
+python prepare_data.py \
+    --data_files ./data/信息抽取_第二阶段/xxcq_mid.json \
+    --context_window 0 \
+    --n_splits 5 \
+    --output_dir data/ \
+    --seed 42
 # INFO:root:Saving to data/ner-ctx0-5fold-seed42
 # INFO:root:Number of raw samples: 5247
 # INFO:root:Fold[0/5] Number of training data: 4197, number of dev data: 1050

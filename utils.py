@@ -80,6 +80,11 @@ def save_samples(filename, samples):
             sample = json.dumps(sample, ensure_ascii=False) + "\n"
             f.write(sample)
 
+def save_groundtruths(filename, groundtruths):
+    with open(filename, "w") as f:
+        for gt in groundtruths:
+            f.write(json.dumps(gt, ensure_ascii=False) + "\n")
+
 def add_context(ordered_samples, context_window):
     if context_window <= 0:
         return ordered_samples

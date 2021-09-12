@@ -12,8 +12,8 @@ outfile = "/output/output.json"
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("--local_debug", action="store_true", default=False)
-    parser.add_argument("--test_file", type=str, default="dev.all.json")
+    parser.add_argument("--local_debug", action="store_true", default=True)
+    parser.add_argument("--test_file", type=str, default=None)
     run_args = parser.parse_args()
     local_debug = run_args.local_debug
 
@@ -25,8 +25,8 @@ def main():
     n_splits = 5
     seed=42
 
-    test_examples = None
-    test_batches = None
+    test_examples = []
+    test_batches = []
     for k in range(n_splits):
         model_path = f"./output/ner-{dataset_name}-{model_type}-{version}-fold{k}-{seed}/"
         # 生成测试运行参数
@@ -42,7 +42,7 @@ def main():
             utils.save_samples(os.path.join(args.data_dir, "test.json"), raw_samples)
             args.test_file = "test.json"
         else:
-            args.test_file = run_args.test_file
+            args.test_file = f"dev.{k}.json"
         parser.save_args_to_json(f"./args/pred.{k}.json", args)
         # 确保目录下预测输出文件被清除
         os.system(f"rm -rf {os.path.join(model_path, 'test_*')}")
@@ -54,30 +54,24 @@ def main():
             # 线上预测阶段
             os.system(f"sudo /home/user/miniconda/bin/python3 run_span.py ./args/pred.{k}.json")
         
-        # 读取预测输出，并集成
+        # 读取预测输出，并合并
         test_examples_ = torch.load(os.path.join(model_path, 'test_examples.pkl'))
         test_batches_ = torch.load(os.path.join(model_path, 'test_batches.pkl'))
-        if test_examples is None:
-            test_examples, test_batches = test_examples_, test_batches_
-        else:
-            for i, (batch, batch_) in enumerate(zip(test_batches, test_batches_)):
-                test_batches[i]["logits"] = batch["logits"] + batch_["logits"]
+        test_examples.extend(test_examples_)
+        test_batches.extend(test_batches_)
 
-    # 集成结果预测
+    # 结果预测
     results = []
     for i, (example, batch) in enumerate(zip(test_examples, test_batches)):
         results.append(predict_decode_batch(example[1], batch, CailNerProcessor().id2label))
     # 保存结果
-    output_predict_file = "output.json" if local_debug else outfile
+    output_predict_file = "output_local.json" if local_debug else outfile
     with open(output_predict_file, "w") as writer:
         for record in results:
             writer.write(json.dumps(record) + '\n')
     
     if local_debug:
-        tmp = run_args.test_file.split(".")
-        tmp.insert(1, "gt")
-        gt_file = ".".join(tmp)
-        os.system(f"python evaluate.py data/ner-ctx0-5fold-seed42/{gt_file} output.json")
+        os.system(f"python evaluate.py data/ner-ctx0-5fold-seed42/dev.gt.all.json output_local.json")
 
 if __name__ == '__main__':
     main()

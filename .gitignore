@@ -1,5 +1,6 @@
 *.pyc
 output.json
+output_local.json
 args/pred*
 output/*
 cache/*

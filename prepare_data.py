@@ -17,8 +17,8 @@ if __name__ == '__main__':
         help="Data files.")
     parser.add_argument("--context_window", default=0, type=int, 
         help="Size of context window.")
-    parser.add_argument("--train_split_ratio", default=0.8, type=float, 
-        help="Size of training data.")
+    # parser.add_argument("--train_split_ratio", default=0.8, type=float, 
+    #     help="Size of training data.")
     parser.add_argument("--n_splits", default=5, type=int, help="For k-fold")
     parser.add_argument("--output_dir", type=str, default="./data/")
     parser.add_argument("--seed", default=42, type=int, 
@@ -94,6 +94,7 @@ if __name__ == '__main__':
     # utils.save_samples(os.path.join(args.output_dir, "dev.json"), dev_samples)
 
     # k-fold
+    dev_samples_all = []; dev_groundtruths_all = []
     kf = KFold(n_splits=args.n_splits)
     for fold_no, (train_index, dev_index) in enumerate(kf.split(raw_samples)):
         train_samples = [raw_samples[index] for index in train_index]
@@ -120,6 +121,12 @@ if __name__ == '__main__':
                 "entities": entities,
                 "text": sample["text"],
             })
-        with open(os.path.join(args.output_dir, f"dev.gt.{fold_no}.json"), "w") as f:
-            for gt in dev_groundtruths:
-                f.write(json.dumps(gt, ensure_ascii=False) + "\n")
+        dev_groundtruths = sorted(dev_groundtruths, key=lambda x: x["id"])
+        utils.save_groundtruths(os.path.join(args.output_dir, f"dev.gt.{fold_no}.json"), dev_groundtruths)
+        
+        dev_samples_all.extend(dev_samples)
+        dev_groundtruths_all.extend(dev_groundtruths)
+    dev_samples_all = sorted(dev_samples_all, key=lambda x: x["id"])
+    dev_groundtruths_all = sorted(dev_groundtruths_all, key=lambda x: x["id"])
+    utils.save_samples(os.path.join(args.output_dir, f"dev.all.json"), dev_samples_all)
+    utils.save_groundtruths(os.path.join(args.output_dir, f"dev.gt.all.json"), dev_groundtruths_all)
