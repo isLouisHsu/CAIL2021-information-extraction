@@ -32,6 +32,7 @@ from transformers import (
 )
 from transformers.modeling_outputs import TokenClassifierOutput
 from nezha.modeling_nezha import NeZhaModel, NeZhaPreTrainedModel
+from nezha.modeling_nezha import relative_position_encoding
 
 # trainer & training arguments
 from transformers import AdamW, get_linear_schedule_with_warmup
@@ -236,8 +237,8 @@ class BertSpanV2ForNer(BertPreTrainedModel):
         self.init_weights()
 
     def forward(self, **kwargs):
-        # if args.rdrop_alpha is not None:
-        #     return forward_rdrop(self, args.rdrop_alpha, **kwargs)
+        if args.rdrop_alpha is not None:
+            return forward_rdrop(self, args.rdrop_alpha, **kwargs)
         return forward(self, **kwargs)
 
 class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
@@ -252,8 +253,8 @@ class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
         self.init_weights()
 
     def forward(self, **kwargs):
-        # if args.rdrop_alpha is not None:
-        #     return forward_rdrop(self, args.rdrop_alpha, **kwargs)
+        if args.rdrop_alpha is not None:
+            return forward_rdrop(self, args.rdrop_alpha, **kwargs)
         return forward(self, **kwargs)
 
 class NerArgumentParser(ArgumentParser):
@@ -297,8 +298,9 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--width_embedding_dim", default=128, type=int)
         self.add_argument("--optimizer", default="adamw", type=str)
         # self.add_argument("--context_window", default=0, type=int)
-        # self.add_argument("--augment_context_aware_p", default=None, type=float)
-        # self.add_argument("--rdrop_alpha", default=None, type=float)
+        self.add_argument("--augment_context_aware_p", default=None, type=float)
+        self.add_argument("--augment_entity_replace_p", default=None, type=float)
+        self.add_argument("--rdrop_alpha", default=None, type=float)
         
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
@@ -446,6 +448,7 @@ class NerDataset(torch.utils.data.Dataset):
         example = self.examples[index]
         # preprocessing
         for proc in self.process_pipline:
+            if proc is None: continue
             example = proc(example)
         # convert to features
         return example
@@ -470,39 +473,92 @@ class NerDataset(torch.utils.data.Dataset):
             collated[k] = t
         return collated
 
-# class AugmentContextAware:
+class AugmentContextAware:
 
-#     def __init__(self, p, min_mlm_span_length, max_mlm_span_length):
-#         self.p = p
-#         self.min_mlm_span_length = min_mlm_span_length
-#         self.max_mlm_span_length = max_mlm_span_length
+    def __init__(self, p):
+        self.p = p
 
-#     def __call__(self, example):
-#         id_ = example[1]["id"]
-#         tokens = example[1]["tokens"]
-#         entities = example[1]["entities"]
-#         sent_start = example[1]["sent_start"]
-#         sent_end = example[1]["sent_end"]
+        self.augment_entity_meanings = [
+            "物品价值", "被盗货币", "盗窃获利", 
+            "受害人", "犯罪嫌疑人"
+        ]
 
-#         entities = sorted(entities, key=lambda x: x[1], reverse=True) # sort by entity start
-#         ner_tags = get_ner_tags(entities, len(tokens))
+    def __call__(self, example):
+        id_ = example[1]["id"]
+        tokens = example[1]["tokens"]
+        entities = example[1]["entities"]
+        sent_start = example[1]["sent_start"]
+        sent_end = example[1]["sent_end"]
 
-#         for label, start, end, span_text in entities:
-#             if random.random() < self.p:
-#                 entity_text_mlm = ["[MASK]"] * random.randint(
-#                     self.min_mlm_span_length, self.max_mlm_span_length)
-#                 tokens = tokens[: start] + entity_text_mlm + tokens[end + 1: ]
-#                 ner_span_tag = [f"B-{label}"] + [f"I-{label}"] * (len(entity_text_mlm) - 1)
-#                 ner_tags = ner_tags[: start] + ner_span_tag + ner_tags[end + 1: ]
-        
-#         entities_new = [[t, s, e, "".join(tokens[s: e])] for t, s, e in get_entities(ner_tags)]
-#         return [example[0], {
-#             "id": id_,
-#             "tokens": tokens,
-#             "entities": entities_new,
-#             "sent_start": sent_start,
-#             "sent_end": sent_start + len(tokens)
-#         }]
+        random.shuffle(entities)
+        for entity_type, entity_start, entity_end, entity_text in entities:
+            if LABEL_MEANING_MAP[entity_type] in self.augment_entity_meanings:
+                if random.random() > self.p: continue
+                if any([tk == "[MASK]" for tk in tokens[entity_start: entity_end + 1]]):
+                    continue
+                for i in range(entity_start, entity_end + 1):
+                    tokens[i] = "[MASK]"
+        example[1]["tokens"] = tokens
+        return example
+
+class AugmentEntityReplace:
+
+    def __init__(self, p, examples):
+        self.p = p
+
+        self.wordType_entityTypes_map = {
+            "姓名": ["受害人", "犯罪嫌疑人", ],
+            "价值": ["物品价值", "被盗货币", "盗窃获利", ],
+        }
+        self.entityType_wordType_map = dict()
+        for word_type, entity_types in self.wordType_entityTypes_map.items():
+            for entity_type in entity_types:
+                self.entityType_wordType_map[entity_type] = word_type
+
+        self.wordType_words_map = {
+            "姓名": set(),
+            "价值": set(),
+        }
+        for example in examples:
+            for entity_type, entity_start, entity_end, entity_text in example[1]["entities"]:
+                meaning = LABEL_MEANING_MAP[entity_type]
+                if meaning not in self.entityType_wordType_map:
+                    continue
+                self.wordType_words_map[self.entityType_wordType_map[meaning]] \
+                    .add(entity_text)
+        self.wordType_words_map = {k: list(v) for k, v in self.wordType_words_map.items()}
+
+    def __call__(self, example):
+        id_ = example[1]["id"]
+        tokens = example[1]["tokens"]
+        entities = example[1]["entities"]
+        sent_start = example[1]["sent_start"]
+        sent_end = example[1]["sent_end"]
+
+        text = "".join(tokens)
+        entities = sorted(entities, key=lambda x: x[0])
+        for i, (entity_type, entity_start, entity_end, entity_text) in enumerate(entities):
+            if random.random() > self.p: continue
+            meaning = LABEL_MEANING_MAP[entity_type]
+            if meaning not in self.entityType_wordType_map:
+                continue
+            entity_text_new = random.choice(self.wordType_words_map[self.entityType_wordType_map[meaning]])
+            len_diff = len(entity_text_new) - len(entity_text)
+            text = text[: entity_start] + entity_text_new + text[entity_end + 1:]
+            entity_start, entity_end = entity_start, entity_start + len(entity_text_new) - 1
+            entities[i] = [entity_type, entity_start, entity_end, text[entity_start: entity_end + 1]]
+            # 调整其他实体位置
+            adjust_pos = lambda x: x if x <= entity_start else x + len_diff
+            for j, (l, s, e, t) in enumerate(entities):
+                s, e = adjust_pos(s), adjust_pos(e)
+                t = text[s: e + 1]
+                entities[j] = [l, s, e, t]
+
+        example[1]["tokens"] = list(text)
+        example[1]["entities"] = entities
+        example[1]["sent_start"] = sent_start
+        example[1]["sent_end"] = sent_start + len(text)
+        return example
 
 # TODO:
 class ReDataMasking:
@@ -802,7 +858,7 @@ def train(args, model, processor, tokenizer):
                                 torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
                                 torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
                                 logger.info("Saving optimizer and scheduler states to %s", output_dir)
-                if args.local_rank in [-1, 0] and \
+                elif args.local_rank in [-1, 0] and \
                         args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
                     output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(
@@ -970,14 +1026,14 @@ def predict_decode_batch(example, batch, id2label, post_process=True):
             # 加入`受害人+被盗物品`的组合
             spans.extend([(a[0], b[1]) for a, b in itertools.product(
                 spans_name, spans) if a[1] - b[0] in [-1, 0]])
-            # `受害人+被盗物品`、`被盗物品`，优先保留`受害人+被盗物品`
-            is_todel = [False] * len(spans)
-            for i, a in enumerate(spans_name):
-                for j, b in enumerate(spans):
-                    u = (a[0], b[1])
-                    if u in spans and u != b:
-                        is_todel[j] = True
-            spans = [span for flag, span in zip(is_todel, spans) if not flag]
+            # # `受害人+被盗物品`、`被盗物品`，优先保留`受害人+被盗物品`
+            # is_todel = [False] * len(spans)
+            # for i, a in enumerate(spans_name):
+            #     for j, b in enumerate(spans):
+            #         u = (a[0], b[1])
+            #         if u in spans and u != b:
+            #             is_todel[j] = True
+            # spans = [span for flag, span in zip(is_todel, spans) if not flag]
             # <<< 姓名处理 <<<
             spans = merge_spans(spans, keep_type="short")
             entities = spans2entities(spans)
@@ -1067,8 +1123,10 @@ def load_dataset(args, processor, tokenizer, data_type='train'):
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
     max_seq_length = args.train_max_seq_length if data_type == 'train' else args.eval_max_seq_length
     return NerDataset(examples, process_pipline=[
-        # AugmentContextAware(args.augment_context_aware_p, 2, 30
-        #     ) if (data_type == 'train' and args.augment_context_aware_p is not None) else None,
+        AugmentEntityReplace(args.augment_entity_replace_p, examples,
+            ) if (data_type == 'train' and args.augment_entity_replace_p is not None) else None,
+        AugmentContextAware(args.augment_context_aware_p,
+            ) if (data_type == 'train' and args.augment_context_aware_p is not None) else None,
         Example2Feature(tokenizer, processor.label2id, max_seq_length, config.max_span_length),
     ])
 
@@ -1082,7 +1140,7 @@ if __name__ == "__main__":
         args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
     else:
         args = parser.build_arguments().parse_args()
-    # args = parser.parse_args_from_json(json_file="args/pred.0.json")
+    # args = parser.parse_args_from_json(json_file="output/ner-cail_ner-bert_span-aug_ctx1.0-fold0-42/training_args.json")
 
     # Set seed before initializing model.
     seed_everything(args.seed)

@@ -11,7 +11,8 @@ outfile = "/output/output.json"
 
 def main():
     local_debug = False
-    version = "baseline"
+    # version = "baseline"
+    version = "rdrop0.1-fgm1.0"
     model_type = "bert_span"
     dataset_name = "cail_ner"
     n_splits = 5

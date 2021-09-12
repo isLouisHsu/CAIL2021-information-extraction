@@ -118,40 +118,116 @@ python evaluate.py \
     ./data/ner-ctx0-5fold-seed42/dev.gt.${k}.json \
     output/ner-cail_ner-bert_span-baseline-fold${k}-42/test_prediction.json
 done
+# avg
+# {'p': 0.9142199194012666, 'r': 0.9188042430086789, 'f': 0.9165063485956138}
+# 犯罪嫌疑人
+# {'p': 0.9647829647829648, 'r': 0.9546191247974068, 'f': 0.959674134419552}
+# 受害人
+# {'p': 0.8846153846153846, 'r': 0.968013468013468, 'f': 0.9244372990353698}
+# 被盗货币
+# {'p': 0.8152173913043478, 'r': 0.8670520231213873, 'f': 0.8403361344537815}
+# 物品价值
+# {'p': 0.9780487804878049, 'r': 0.9828431372549019, 'f': 0.9804400977995109}
+# 盗窃获利
+# {'p': 0.8780487804878049, 'r': 0.9152542372881356, 'f': 0.896265560165975}
+# 被盗物品
+# {'p': 0.903485254691689, 'r': 0.8829694323144105, 'f': 0.8931095406360424}
+# 作案工具
+# {'p': 0.7407407407407407, 'r': 0.7874015748031497, 'f': 0.7633587786259541}
+# 时间
+# {'p': 0.9361702127659575, 'r': 0.9219047619047619, 'f': 0.928982725527831}
+# 地点
+# {'p': 0.8971830985915493, 'r': 0.885952712100139, 'f': 0.8915325402379286}
+# 组织机构
+# {'p': 0.8450704225352113, 'r': 0.8450704225352113, 'f': 0.8450704225352113}
 
-# INFO:root:Counter({'犯罪嫌疑人': 1312, '被盗物品': 1202, '地点': 740, '时间': 573, '受害人': 570, '物品价值': 454, '作案工具': 171, '被盗货币': 170, '组织机构': 158, '盗窃获利': 79})
 for k in 0 1 2 3 4
 do
 python run_span.py \
-    --version=legal_electra_base-fold${k} \
+    --version=rdrop0.1-fgm1.0-fold${k} \
     --data_dir=./data/ner-ctx0-5fold-seed42/ \
     --train_file=train.${k}.json \
     --dev_file=dev.${k}.json \
     --test_file=dev.${k}.json \
     --model_type=bert_span \
-    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/hfl_chinese-legal-electra-base-discriminator/ \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/chinese-roberta-wwm/ \
     --do_train \
-    --do_eval \
-    --do_predict \
     --overwrite_output_dir \
     --evaluate_during_training \
     --evaluate_each_epoch \
     --save_best_checkpoints \
-    --max_span_length=50 \
+    --max_span_length=40 \
     --width_embedding_dim=128 \
     --train_max_seq_length=512 \
     --eval_max_seq_length=512 \
     --do_lower_case \
-    --per_gpu_train_batch_size=12 \
-    --per_gpu_eval_batch_size=24 \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
     --gradient_accumulation_steps=2 \
-    --learning_rate=2e-5 \
-    --other_learning_rate=1e-4 \
-    --num_train_epochs=8.0 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=4.0 \
     --warmup_proportion=0.1 \
+    --rdrop_alpha=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
     --seed=42
-python evaluate.py \
-    ./data/ner-ctx0-5fold-seed42/dev.gt.${k}.json \
-    output/ner-cail_ner-bert_span-baseline-fold${k}-42/test_prediction.json
 done
+# avg
+# {'p': 0.9452107279693487, 'r': 0.9515911282545805, 'f': 0.9483901970206632}
+# 犯罪嫌疑人
+# {'p': 0.9821573398215734, 'r': 0.9813614262560778, 'f': 0.9817592217267938}
+# 受害人
+# {'p': 0.93026941362916, 'r': 0.9882154882154882, 'f': 0.9583673469387756}
+# 被盗货币
+# {'p': 0.8461538461538461, 'r': 0.953757225433526, 'f': 0.8967391304347825}
+# 物品价值
+# {'p': 0.9901960784313726, 'r': 0.9901960784313726, 'f': 0.9901960784313726}
+# 盗窃获利
+# {'p': 0.9652173913043478, 'r': 0.940677966101695, 'f': 0.9527896995708155}
+# 被盗物品
+# {'p': 0.9335106382978723, 'r': 0.9196506550218341, 'f': 0.9265288165420149}
+# 作案工具
+# {'p': 0.8472222222222222, 'r': 0.9606299212598425, 'f': 0.9003690036900368}
+# 时间
+# {'p': 0.9455252918287937, 'r': 0.9257142857142857, 'f': 0.9355149181905678}
+# 地点
+# {'p': 0.9415121255349501, 'r': 0.9179415855354659, 'f': 0.9295774647887323}
+# 组织机构
+# {'p': 0.8940397350993378, 'r': 0.9507042253521126, 'f': 0.9215017064846417}
+
+# for k in 0 1 2 3 4
+# do
+# python run_span.py \
+#     --version=legal_electra_base-fold${k} \
+#     --data_dir=./data/ner-ctx0-5fold-seed42/ \
+#     --train_file=train.${k}.json \
+#     --dev_file=dev.${k}.json \
+#     --test_file=dev.${k}.json \
+#     --model_type=bert_span \
+#     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/hfl_chinese-legal-electra-base-discriminator/ \
+#     --do_train \
+#     --do_eval \
+#     --do_predict \
+#     --overwrite_output_dir \
+#     --evaluate_during_training \
+#     --evaluate_each_epoch \
+#     --save_best_checkpoints \
+#     --max_span_length=50 \
+#     --width_embedding_dim=128 \
+#     --train_max_seq_length=512 \
+#     --eval_max_seq_length=512 \
+#     --do_lower_case \
+#     --per_gpu_train_batch_size=12 \
+#     --per_gpu_eval_batch_size=24 \
+#     --gradient_accumulation_steps=2 \
+#     --learning_rate=2e-5 \
+#     --other_learning_rate=1e-4 \
+#     --num_train_epochs=8.0 \
+#     --warmup_proportion=0.1 \
+#     --seed=42
+# python evaluate.py \
+#     ./data/ner-ctx0-5fold-seed42/dev.gt.${k}.json \
+#     output/ner-cail_ner-bert_span-legal_electra_base-fold${k}-42/test_prediction.json
+# done
 # <<< 第二阶段 <<<
+
