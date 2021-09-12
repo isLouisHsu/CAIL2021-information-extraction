@@ -954,8 +954,8 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
     return results
     
 def predict_decode_batch(example, batch, id2label, post_process=True):
-    if example["id"].split("-")[-1] == "0004d0b59e19461ff126e3a08a814c33":
-        print()
+    # if example["id"].split("-")[-1] == "033522d9bdf796d13c4b594cbdf03184":
+    #     print()
     is_intersect = lambda a, b: min(a[1], b[1]) - max(a[0], b[0]) > 0
     is_a_included_by_b = lambda a, b: min(a[1], b[1]) - max(a[0], b[0]) == a[1] - a[0]
     is_contain_special_char = lambda x: any([c in text[x[0]: x[1]] for c in ["，", ",", "、"]])
@@ -1140,7 +1140,7 @@ if __name__ == "__main__":
         args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
     else:
         args = parser.build_arguments().parse_args()
-    # args = parser.parse_args_from_json(json_file="output/ner-cail_ner-bert_span-aug_ctx1.0-fold0-42/training_args.json")
+    # args = parser.parse_args_from_json(json_file="output/ner-cail_ner-bert_span-rdrop0.1-fgm1.0-fold3-42/training_args.json")
 
     # Set seed before initializing model.
     seed_everything(args.seed)
