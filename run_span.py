@@ -1107,7 +1107,7 @@ PROCESSER_CLASS = {
 
 MODEL_CLASSES = {
     "bert_span": (BertConfigSpanV2, BertSpanV2ForNer, BertTokenizer),
-    # "nezha_span": (BertConfigSpanV2, NeZhaSpanV2ForNer, BertTokenizer),
+    "nezha_span": (BertConfigSpanV2, NeZhaSpanV2ForNer, BertTokenizer),
 }
 
 def load_dataset(args, processor, tokenizer, data_type='train'):
