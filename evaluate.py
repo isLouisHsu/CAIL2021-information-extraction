@@ -148,8 +148,8 @@ def analyze_error(ground_truth_path, output_path):
     plt.savefig(os.path.join("tmp", "cm.jpg"))
 
 if __name__ == '__main__':
-    # ground_truth_path, output_path = sys.argv[1], sys.argv[2]
-    ground_truth_path, output_path = "data/ner-ctx0-5fold-seed42/dev.gt.all.json", "output.json"
+    ground_truth_path, output_path = sys.argv[1], sys.argv[2]
+    # ground_truth_path, output_path = "data/ner-ctx0-5fold-seed42/dev.gt.all.json", "output.json"
     for label, score in get_scores(ground_truth_path, output_path).items():
         print(LABEL_MEANING_MAP.get(label, label))
         print(score)

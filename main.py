@@ -19,8 +19,19 @@ def main():
 
     # WARNING：以下配置需要在提交前指定！！！
     # version = "baseline"
-    version = "rdrop0.1-fgm1.0"
-    model_type = "bert_span"
+    # model_type = "bert_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    # version = "rdrop0.1-fgm1.0"
+    # model_type = "bert_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    version = "nezha_rdrop0.1-fgm1.0"
+    model_type = "nezha_span"
     dataset_name = "cail_ner"
     n_splits = 5
     seed=42
