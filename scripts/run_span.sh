@@ -250,6 +250,108 @@ done
 # 组织机构
 # {'p': 0.9203860072376358, 'r': 0.9466501240694789, 'f': 0.9333333333333333}
 
+# TODO: 去掉rdrop
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-fgm1.0-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=4.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --seed=42
+done
+
+# TODO: rdrop待定，label smooth 0.1
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-fgm1.0-lsr0.1-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=4.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --seed=42
+done
+
+# TODO: focal
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-fgm1.0-focalg2.0a0.25-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=4.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=focal --focal_gamma=2.0 --focal_alpha=0.25 \
+    --seed=42
+done
+# <<< 第二阶段 <<<
+
+
+
+# ==================================================================================================================
 # for k in 0 1 2 3 4
 # do
 # python run_span.py \
@@ -284,5 +386,70 @@ done
 #     ./data/ner-ctx0-5fold-seed42/dev.gt.${k}.json \
 #     output/ner-cail_ner-bert_span-legal_electra_base-fold${k}-42/test_prediction.json
 # done
-# <<< 第二阶段 <<<
 
+# for k in 0 1 2 3 4
+# do
+# python run_span.py \
+#     --version=nezha-rdrop0.1-fgm1.0-fp16-fold${k} \
+#     --data_dir=./data/ner-ctx0-5fold-seed42/ \
+#     --train_file=train.${k}.json \
+#     --dev_file=dev.${k}.json \
+#     --test_file=dev.${k}.json \
+#     --model_type=nezha_span \
+#     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+#     --do_train \
+#     --overwrite_output_dir \
+#     --evaluate_during_training \
+#     --evaluate_each_epoch \
+#     --save_best_checkpoints \
+#     --max_span_length=40 \
+#     --width_embedding_dim=128 \
+#     --train_max_seq_length=512 \
+#     --eval_max_seq_length=512 \
+#     --do_lower_case \
+#     --per_gpu_train_batch_size=6 \
+#     --per_gpu_eval_batch_size=12 \
+#     --gradient_accumulation_steps=2 \
+#     --learning_rate=5e-5 \
+#     --other_learning_rate=1e-3 \
+#     --num_train_epochs=4.0 \
+#     --warmup_proportion=0.1 \
+#     --rdrop_alpha=0.1 \
+#     --do_fgm --fgm_epsilon=1.0 \
+#     --seed=42 \
+#     --fp16
+# done
+
+# for k in 0 1 2 3 4
+# do
+# python run_span.py \
+#     --version=nezha-rdrop0.1-vat0.1-fgm1.0-fp16-fold${k} \
+#     --data_dir=./data/ner-ctx0-5fold-seed42/ \
+#     --train_file=train.${k}.json \
+#     --dev_file=dev.${k}.json \
+#     --test_file=dev.${k}.json \
+#     --model_type=nezha_span \
+#     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+#     --do_train \
+#     --overwrite_output_dir \
+#     --evaluate_during_training \
+#     --evaluate_each_epoch \
+#     --save_best_checkpoints \
+#     --max_span_length=40 \
+#     --width_embedding_dim=128 \
+#     --train_max_seq_length=512 \
+#     --eval_max_seq_length=512 \
+#     --do_lower_case \
+#     --per_gpu_train_batch_size=6 \
+#     --per_gpu_eval_batch_size=12 \
+#     --gradient_accumulation_steps=2 \
+#     --learning_rate=5e-5 \
+#     --other_learning_rate=1e-3 \
+#     --num_train_epochs=4.0 \
+#     --warmup_proportion=0.1 \
+#     --rdrop_alpha=0.1 \
+#     --do_fgm --fgm_epsilon=1.0 \
+#     --vat_alpha=0.1 \
+#     --seed=42 \
+#     --fp16
+# done
