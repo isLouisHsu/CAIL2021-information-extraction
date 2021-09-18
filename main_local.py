@@ -35,6 +35,12 @@ def main():
     dataset_name = "cail_ner"
     n_splits = 5
     seed=42
+    # --------------------------
+    # version = "nezha-fgm1.0"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
 
     test_examples = []
     test_batches = []

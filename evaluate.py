@@ -135,7 +135,6 @@ def analyze_error(ground_truth_path, output_path):
     y_pred = [prediction_positions_label_map[k] for k in itersection_positions]
     labels = list(LABEL_MEANING_MAP.values())
     cm = confusion_matrix(y_true, y_pred, labels=labels)
-    disp = ConfusionMatrixDisplay(cm, display_labels=labels).plot()
     label_error_type_count_map = Counter(["-".join(e.split("-")[-2:]) for e in label_error])
     # 保存
     for list_name in ["ground_truth_entities", "prediction_entities", 
@@ -145,6 +144,7 @@ def analyze_error(ground_truth_path, output_path):
                 f.write(line + "\n")
     print(label_error_type_count_map)
     print(labels)
+    disp = ConfusionMatrixDisplay(cm, display_labels=labels).plot()
     plt.savefig(os.path.join("tmp", "cm.jpg"))
 
 if __name__ == '__main__':

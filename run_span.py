@@ -267,43 +267,43 @@ def forward(
         attentions=outputs.attentions,
     )
 
-# def compute_kl_loss(p, q, pad_mask=None):
-
-#     batch_size, num_spans, num_labels = p.size()
-#     if pad_mask is None:
-#         pad_mask = torch.ones(batch_size, num_spans, dtype=torch.bool, device=p.device)
-#     pad_mask = pad_mask.unsqueeze(-1).expand(batch_size, num_spans, num_labels)
-    
-#     p_loss = F.kl_div(F.log_softmax(p, dim=-1), F.softmax(q, dim=-1), reduction='none')
-#     q_loss = F.kl_div(F.log_softmax(q, dim=-1), F.softmax(p, dim=-1), reduction='none')
-    
-#     # pad_mask is for seq-level tasks
-#     p_loss.masked_fill_(pad_mask, 0.)
-#     q_loss.masked_fill_(pad_mask, 0.)
-
-#     # You can choose whether to use function "sum" and "mean" depending on your task
-#     p_loss = p_loss.mean()
-#     q_loss = q_loss.mean()
-
-#     loss = (p_loss + q_loss) / 2
-#     return loss
-
 def compute_kl_loss(p, q, pad_mask=None):
 
     batch_size, num_spans, num_labels = p.size()
     if pad_mask is None:
         pad_mask = torch.ones(batch_size, num_spans, dtype=torch.bool, device=p.device)
     pad_mask = pad_mask.unsqueeze(-1).expand(batch_size, num_spans, num_labels)
-
+    
     p_loss = F.kl_div(F.log_softmax(p, dim=-1), F.softmax(q, dim=-1), reduction='none')
     q_loss = F.kl_div(F.log_softmax(q, dim=-1), F.softmax(p, dim=-1), reduction='none')
     
-    mask_valid = ~pad_mask
-    p_loss = p_loss[mask_valid].mean()
-    q_loss = q_loss[mask_valid].mean()
-    loss = (p_loss + q_loss) / 2
+    # pad_mask is for seq-level tasks
+    p_loss.masked_fill_(pad_mask, 0.)
+    q_loss.masked_fill_(pad_mask, 0.)
 
+    # You can choose whether to use function "sum" and "mean" depending on your task
+    p_loss = p_loss.mean()
+    q_loss = q_loss.mean()
+
+    loss = (p_loss + q_loss) / 2
     return loss
+
+# def compute_kl_loss(p, q, pad_mask=None):
+
+#     batch_size, num_spans, num_labels = p.size()
+#     if pad_mask is None:
+#         pad_mask = torch.ones(batch_size, num_spans, dtype=torch.bool, device=p.device)
+#     pad_mask = pad_mask.unsqueeze(-1).expand(batch_size, num_spans, num_labels)
+
+#     p_loss = F.kl_div(F.log_softmax(p, dim=-1), F.softmax(q, dim=-1), reduction='none')
+#     q_loss = F.kl_div(F.log_softmax(q, dim=-1), F.softmax(p, dim=-1), reduction='none')
+    
+#     mask_valid = ~pad_mask
+#     p_loss = p_loss[mask_valid].mean()
+#     q_loss = q_loss[mask_valid].mean()
+#     loss = (p_loss + q_loss) / 2
+
+#     return loss
 
 def forward_rdrop(cls, alpha, **kwargs):
     outputs1 = forward(cls, **kwargs)
