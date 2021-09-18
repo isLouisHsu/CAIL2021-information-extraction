@@ -5,7 +5,8 @@ args/pred*
 output/*
 cache/*
 tmp/*
-data/ner-*
+data/*
 .vscode/
 .ipynb_checkpoints/
 !.gitkeep
+！checksum
