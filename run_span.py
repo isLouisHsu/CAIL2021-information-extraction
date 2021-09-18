@@ -1132,14 +1132,14 @@ def predict_decode_batch(example, batch, id2label, post_process=True):
             # 加入`受害人+被盗物品`的组合
             spans.extend([(a[0], b[1]) for a, b in itertools.product(
                 spans_name, spans) if a[1] - b[0] in [-1, 0]])
-            # # `受害人+被盗物品`、`被盗物品`，优先保留`受害人+被盗物品`
-            # is_todel = [False] * len(spans)
-            # for i, a in enumerate(spans_name):
-            #     for j, b in enumerate(spans):
-            #         u = (a[0], b[1])
-            #         if u in spans and u != b:
-            #             is_todel[j] = True
-            # spans = [span for flag, span in zip(is_todel, spans) if not flag]
+            # `受害人+被盗物品`、`被盗物品`，优先保留`受害人+被盗物品`
+            is_todel = [False] * len(spans)
+            for i, a in enumerate(spans_name):
+                for j, b in enumerate(spans):
+                    u = (a[0], b[1])
+                    if u in spans and u != b:
+                        is_todel[j] = True
+            spans = [span for flag, span in zip(is_todel, spans) if not flag]
             # <<< 姓名处理 <<<
             spans = merge_spans(spans, keep_type="short")
             entities = spans2entities(spans)
