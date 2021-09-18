@@ -229,27 +229,27 @@ python run_span.py \
 done
 # main_local
 # avg
-# {'p': 0.9433435148625493, 'r': 0.949889351487191, 'f': 0.9466051170874838}
+# {'p': 0.8898079874237377, 'r': 0.8916769813585387, 'f': 0.8907415039904079}
 # 犯罪嫌疑人
-# {'p': 0.9784416384354789, 'r': 0.983134767136005, 'f': 0.9807825885621673}
+# {'p': 0.9548456458301336, 'r': 0.9619371808757543, 'f': 0.9583782950516417}
 # 受害人
-# {'p': 0.946600434647625, 'r': 0.981016731016731, 'f': 0.9635013430241745}
+# {'p': 0.9174141664089082, 'r': 0.9543114543114544, 'f': 0.9354991326289229}
 # 被盗货币
-# {'p': 0.8947368421052632, 'r': 0.9475409836065574, 'f': 0.9203821656050956}
+# {'p': 0.8018575851393189, 'r': 0.8491803278688524, 'f': 0.8248407643312102}
 # 物品价值
-# {'p': 0.9842931937172775, 'r': 0.9894736842105263, 'f': 0.9868766404199475}
+# {'p': 0.9693192713326941, 'r': 0.9674641148325359, 'f': 0.9683908045977011}
 # 盗窃获利
-# {'p': 0.9301397205588823, 'r': 0.9688149688149689, 'f': 0.9490835030549899}
+# {'p': 0.8557504873294347, 'r': 0.9126819126819127, 'f': 0.8832997987927566}
 # 被盗物品
-# {'p': 0.9147816938453446, 'r': 0.9024390243902439, 'f': 0.9085684430512017}
+# {'p': 0.8040147913365029, 'r': 0.7898287493513233, 'f': 0.7968586387434555}
 # 作案工具
-# {'p': 0.8863636363636364, 'r': 0.9551020408163265, 'f': 0.9194499017681729}
+# {'p': 0.7706666666666667, 'r': 0.7863945578231293, 'f': 0.7784511784511785}
 # 时间
-# {'p': 0.955661414437523, 'r': 0.9432188065099457, 'f': 0.9493993447397161}
+# {'p': 0.9394717534849596, 'r': 0.9262206148282097, 'f': 0.9327991258422873}
 # 地点
-# {'p': 0.9213002566295979, 'r': 0.9186806937731021, 'f': 0.9199886104783599}
+# {'p': 0.8587241479755316, 'r': 0.8382143872618709, 'f': 0.8483453237410072}
 # 组织机构
-# {'p': 0.9203860072376358, 'r': 0.9466501240694789, 'f': 0.9333333333333333}
+# {'p': 0.8555691554467564, 'r': 0.8672456575682382, 'f': 0.8613678373382625}
 
 # 去掉rdrop
 for k in 0 1 2 3 4
@@ -306,41 +306,7 @@ done
 # 组织机构
 # {'p': 0.8588957055214724, 'r': 0.8684863523573201, 'f': 0.8636644046884641}
 
-# TODO: label smooth 0.1
-for k in 0 1 2 3 4
-do
-python run_span.py \
-    --version=nezha-rdrop0.1-fgm1.0-lsr0.1-fold${k} \
-    --data_dir=./data/ner-ctx0-5fold-seed42/ \
-    --train_file=train.${k}.json \
-    --dev_file=dev.${k}.json \
-    --test_file=dev.${k}.json \
-    --model_type=nezha_span \
-    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
-    --do_train \
-    --overwrite_output_dir \
-    --evaluate_during_training \
-    --evaluate_each_epoch \
-    --save_best_checkpoints \
-    --max_span_length=40 \
-    --width_embedding_dim=128 \
-    --train_max_seq_length=512 \
-    --eval_max_seq_length=512 \
-    --do_lower_case \
-    --per_gpu_train_batch_size=8 \
-    --per_gpu_eval_batch_size=16 \
-    --gradient_accumulation_steps=2 \
-    --learning_rate=5e-5 \
-    --other_learning_rate=1e-3 \
-    --num_train_epochs=4.0 \
-    --warmup_proportion=0.1 \
-    --rdrop_alpha=0.1 \
-    --do_fgm --fgm_epsilon=1.0 \
-    --loss_type=lsr --label_smooth_eps=0.1 \
-    --seed=42
-done
-
-# TODO: focal
+# focal
 for k in 0 1 2 3 4
 do
 python run_span.py \
@@ -373,11 +339,105 @@ python run_span.py \
     --loss_type=focal --focal_gamma=2.0 --focal_alpha=0.25 \
     --seed=42
 done
+# main_local
+# avg
+# {'p': 0.8764269298873526, 'r': 0.8725479164322418, 'f': 0.8744831215698068}
+# 犯罪嫌疑人
+# {'p': 0.9334845049130763, 'r': 0.9554386507813709, 'f': 0.9443339960238568}
+# 受害人
+# {'p': 0.9038400507775309, 'r': 0.9163449163449163, 'f': 0.9100495286787026}
+# 被盗货币
+# {'p': 0.8149732620320855, 'r': 0.8327868852459016, 'f': 0.8237837837837838}
+# 物品价值
+# {'p': 0.9555765595463138, 'r': 0.9674641148325359, 'f': 0.9614835948644794}
+# 盗窃获利
+# {'p': 0.8493150684931506, 'r': 0.9022869022869023, 'f': 0.875}
+# 被盗物品
+# {'p': 0.7896645512239348, 'r': 0.7533298737242692, 'f': 0.7710694050991501}
+# 作案工具
+# {'p': 0.7427385892116183, 'r': 0.7306122448979592, 'f': 0.7366255144032923}
+# 时间
+# {'p': 0.9340900768949103, 'r': 0.9226039783001808, 'f': 0.9283114992721979}
+# 地点
+# {'p': 0.8347725964306275, 'r': 0.8245663918112027, 'f': 0.8296381061364613}
+# 组织机构
+# {'p': 0.8795336787564767, 'r': 0.8424317617866005, 'f': 0.8605830164765527}
+
+# TODO: context-aware
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-rdrop0.1-fgm1.0-aug_ctx0.1-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=4.0 \
+    --warmup_proportion=0.1 \
+    --rdrop_alpha=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --augment_context_aware_p=0.1 \
+    --seed=42
+done
+
+# TODO: albert
+# TODO: distill
+# TODO: further pretrain，加入别的赛道数据
+# TODO: 伪标签，别的赛道数据作为无标签数据
 # <<< 第二阶段 <<<
 
-
-
 # ==================================================================================================================
+# TODO: label smooth 0.1
+# for k in 0 1 2 3 4
+# do
+# python run_span.py \
+#     --version=nezha-rdrop0.1-fgm1.0-lsr0.1-fold${k} \
+#     --data_dir=./data/ner-ctx0-5fold-seed42/ \
+#     --train_file=train.${k}.json \
+#     --dev_file=dev.${k}.json \
+#     --test_file=dev.${k}.json \
+#     --model_type=nezha_span \
+#     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+#     --do_train \
+#     --overwrite_output_dir \
+#     --evaluate_during_training \
+#     --evaluate_each_epoch \
+#     --save_best_checkpoints \
+#     --max_span_length=40 \
+#     --width_embedding_dim=128 \
+#     --train_max_seq_length=512 \
+#     --eval_max_seq_length=512 \
+#     --do_lower_case \
+#     --per_gpu_train_batch_size=8 \
+#     --per_gpu_eval_batch_size=16 \
+#     --gradient_accumulation_steps=2 \
+#     --learning_rate=5e-5 \
+#     --other_learning_rate=1e-3 \
+#     --num_train_epochs=4.0 \
+#     --warmup_proportion=0.1 \
+#     --rdrop_alpha=0.1 \
+#     --do_fgm --fgm_epsilon=1.0 \
+#     --loss_type=lsr --label_smooth_eps=0.1 \
+#     --seed=42
+# done
+
 # for k in 0 1 2 3 4
 # do
 # python run_span.py \

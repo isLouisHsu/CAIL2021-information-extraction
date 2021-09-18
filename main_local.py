@@ -30,17 +30,23 @@ def main():
     # n_splits = 5
     # seed=42
     # --------------------------
-    version = "nezha_rdrop0.1-fgm1.0"
-    model_type = "nezha_span"
-    dataset_name = "cail_ner"
-    n_splits = 5
-    seed=42
+    # version = "nezha_rdrop0.1-fgm1.0"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
     # --------------------------
     # version = "nezha-fgm1.0"
     # model_type = "nezha_span"
     # dataset_name = "cail_ner"
     # n_splits = 5
     # seed=42
+    # --------------------------
+    version = "nezha-rdrop0.1-fgm1.0-focalg2.0a0.25"
+    model_type = "nezha_span"
+    dataset_name = "cail_ner"
+    n_splits = 5
+    seed=42
 
     test_examples = []
     test_batches = []

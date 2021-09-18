@@ -100,11 +100,10 @@ class FocalLoss(nn.Module):
     Softmax and sigmoid focal loss
     """
 
-    def __init__(self, num_labels, activation_type='softmax', reduction='mean',
+    def __init__(self, activation_type='softmax', reduction='mean',
             gamma=2.0, alpha=0.25, epsilon=1.e-9):
 
         super(FocalLoss, self).__init__()
-        self.num_labels = num_labels
         self.gamma = gamma
         self.alpha = alpha
         self.epsilon = epsilon
@@ -120,8 +119,9 @@ class FocalLoss(nn.Module):
             shape of [batch_size]
         """
         if self.activation_type == 'softmax':
+            num_labels = input.size(-1)
             idx = target.view(-1, 1).long()
-            one_hot_key = torch.zeros(idx.size(0), self.num_labels, dtype=torch.float32, device=idx.device)
+            one_hot_key = torch.zeros(idx.size(0), num_labels, dtype=torch.float32, device=idx.device)
             one_hot_key = one_hot_key.scatter_(1, idx, 1)
             logits = F.softmax(input, dim=-1)
             loss = -self.alpha * one_hot_key * torch.pow((1 - logits), self.gamma) * (logits + self.epsilon).log()
@@ -201,7 +201,7 @@ class SpanV2Loss(nn.Module):
         elif args.loss_type == "lsr":
             self.loss_fct = LabelSmoothingCE(eps=args.label_smooth_eps, reduction='none')
         elif args.loss_type == "focal":
-            self.loss_fct = FocalLoss(num_labels=..., reduction='none', 
+            self.loss_fct = FocalLoss(reduction='none', 
                 gamma=args.focal_gamma, alpha=args.focal_alpha) # TODO:
     
     def forward(self, 
