@@ -580,8 +580,10 @@ class AugmentContextAware:
         self.p = p
 
         self.augment_entity_meanings = [
-            "物品价值", "被盗货币", "盗窃获利", 
-            "受害人", "犯罪嫌疑人"
+            # "物品价值", "被盗货币", "盗窃获利",
+            # "被盗物品", "作案工具", 
+            "受害人", "犯罪嫌疑人",
+            # "地点", "组织机构",
         ]
 
     def __call__(self, example):
@@ -1064,7 +1066,7 @@ def predict_decode_batch(example, batch, id2label, post_process=True):
     #     print()
     is_intersect = lambda a, b: min(a[1], b[1]) - max(a[0], b[0]) > 0
     is_a_included_by_b = lambda a, b: min(a[1], b[1]) - max(a[0], b[0]) == a[1] - a[0]
-    is_contain_special_char = lambda x: any([c in text[x[0]: x[1]] for c in ["，", ",", "、"]])
+    is_contain_special_char = lambda x: any([c in text[x[0]: x[1]] for c in ["，", "。", "、", ",", ".",]])
     is_length_le_n = lambda x, n: x[1] - x[0] < n
     entities2spans = lambda entities: [(int(e.split(";")[0]), int(e.split(";")[1])) for e in entities]
     spans2entities = lambda spans: [f"{b};{e}" for b, e in spans]
@@ -1108,8 +1110,10 @@ def predict_decode_batch(example, batch, id2label, post_process=True):
     label_entities_map = {label: [] for label in LABEL_MEANING_MAP.keys()}
     for t, b, e in pred: label_entities_map[t].append(f"{b};{e+1}")
     if post_process:
-        # 若存在时间、地点实体重叠，则保留较长的
-        for meaning in ["时间", "地点"]:
+        # 若存在以下实体重叠，则保留较长的
+        for meaning in [
+            "时间", "地点",
+        ]:
             label = MEANING_LABEL_MAP[meaning]
             entities = label_entities_map[label]                        # 左闭右开
             if entities:
@@ -1141,9 +1145,50 @@ def predict_decode_batch(example, batch, id2label, post_process=True):
                         is_todel[j] = True
             spans = [span for flag, span in zip(is_todel, spans) if not flag]
             # <<< 姓名处理 <<<
+            # # TODO: >>> 地点处理 >>>
+            # entities_name = label_entities_map[MEANING_LABEL_MAP["地点"]]
+            # spans_name = entities2spans(entities_name)
+            # # 加入`地点+被盗物品`的组合
+            # spans.extend([(a[0], b[1]) for a, b in itertools.product(
+            #     spans_name, spans) if a[1] - b[0] in [-1, 0]])
+            # # `地点+被盗物品`、`被盗物品`，优先保留`地点+被盗物品`
+            # is_todel = [False] * len(spans)
+            # for i, a in enumerate(spans_name):
+            #     for j, b in enumerate(spans):
+            #         u = (a[0], b[1])
+            #         if u in spans and u != b:
+            #             is_todel[j] = True
+            # spans = [span for flag, span in zip(is_todel, spans) if not flag]
+            # # <<< 地点处理 <<<
             spans = merge_spans(spans, keep_type="short")
             entities = spans2entities(spans)
             label_entities_map[label] = entities
+
+        # # TODO: 1. 若存在被盗货币实体重叠，保留最长的；2. 被盗货币要和人名联系
+        # meaning = "被盗货币"
+        # label = MEANING_LABEL_MAP[meaning]
+        # entities = label_entities_map[label]                            # 左闭右开
+        # if entities:
+        #     spans = entities2spans(entities)
+        #     spans = list(filter(lambda x: not is_contain_special_char(x), spans))
+        #     # # TODO: >>> 姓名处理 >>>
+        #     # entities_name = label_entities_map[MEANING_LABEL_MAP["受害人"]]
+        #     # spans_name = entities2spans(entities_name)
+        #     # # 加入`受害人+被盗货币`的组合
+        #     # spans.extend([(a[0], b[1]) for a, b in itertools.product(
+        #     #     spans_name, spans) if a[1] - b[0] in [-1, 0]])
+        #     # # `受害人+被盗货币`、`被盗货币`，优先保留`受害人+被盗货币`
+        #     # is_todel = [False] * len(spans)
+        #     # for i, a in enumerate(spans_name):
+        #     #     for j, b in enumerate(spans):
+        #     #         u = (a[0], b[1])
+        #     #         if u in spans and u != b:
+        #     #             is_todel[j] = True
+        #     # spans = [span for flag, span in zip(is_todel, spans) if not flag]
+        #     # # <<< 姓名处理 <<<
+        #     spans = merge_spans(spans, keep_type="long")
+        #     entities = spans2entities(spans)
+        #     label_entities_map[label] = entities
 
         # 受害人和犯罪嫌疑人设置最长实体限制(10)
         for meaning in ["受害人", "犯罪嫌疑人"]:
@@ -1154,7 +1199,23 @@ def predict_decode_batch(example, batch, id2label, post_process=True):
                 spans = list(filter(lambda x: (not is_contain_special_char(x)) and is_length_le_n(x, 10), spans))
                 entities = spans2entities(spans)
                 label_entities_map[label] = entities
-
+        
+        # # TODO: 元现金
+        # for meaning in [
+        #     "被盗货币",
+        #     "物品价值",
+        #     "盗窃获利",
+        # ]:
+        #     label = MEANING_LABEL_MAP[meaning]
+        #     entities = label_entities_map[label]
+        #     if entities:
+        #         spans = entities2spans(entities)
+        #         for i, (l, r) in enumerate(spans):
+        #             if text[r - 1] == "元" and text[r: r + 2] == "现金":
+        #                 spans[i] = (l, r + 2)
+        #         entities = spans2entities(spans)
+        #         label_entities_map[label] = entities
+                
     entities = [{"label": label, "span": label_entities_map[label]} \
         for label in LABEL_MEANING_MAP.keys()]
     # 预测结果文件为一个json格式的文件，包含两个字段，分别为``id``和``entities``
@@ -1246,7 +1307,7 @@ if __name__ == "__main__":
         args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
     else:
         args = parser.build_arguments().parse_args()
-    # args = parser.parse_args_from_json(json_file="output/ner-cail_ner-bert_span-rdrop0.1-fgm1.0-fold3-42/training_args.json")
+    # args = parser.parse_args_from_json(json_file="args/pred.1.json")
 
     # Set seed before initializing model.
     seed_everything(args.seed)
@@ -1324,6 +1385,17 @@ if __name__ == "__main__":
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
     # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
     if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+        # 将early stop模型保存到输出目录下
+        if args.save_best_checkpoints:
+            best_checkpoints = os.path.join(args.output_dir, "checkpoint-999999")
+            config = config_class.from_pretrained(best_checkpoints,
+                                                  num_labels=num_labels, max_span_length=args.max_span_length,
+                                                  cache_dir=args.cache_dir if args.cache_dir else None, )
+            tokenizer = tokenizer_class.from_pretrained(best_checkpoints,
+                                                        do_lower_case=args.do_lower_case, 
+                                                        cache_dir=args.cache_dir if args.cache_dir else None, )
+            model = model_class.from_pretrained(best_checkpoints, config=config, 
+                                                cache_dir=args.cache_dir if args.cache_dir else None)
         # Create output directory if needed
         if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(args.output_dir)
