@@ -9,7 +9,11 @@ from torch.nn import CrossEntropyLoss, MSELoss
 from .configuration_nezha import NeZhaConfig
 from transformers.file_utils import add_start_docstrings, add_start_docstrings_to_model_forward
 from transformers.modeling_utils import PreTrainedModel, prune_linear_layer
-from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions, BaseModelOutputWithPastAndCrossAttentions
+from transformers.modeling_outputs import (
+    BaseModelOutputWithPoolingAndCrossAttentions, 
+    BaseModelOutputWithPastAndCrossAttentions,
+    MaskedLMOutput,
+)
 from transformers.models.bert.modeling_bert import (
     BertOutput,
     BertPooler,
@@ -710,7 +714,10 @@ class NeZhaForMaskedLM(NeZhaPreTrainedModel):
             inputs_embeds=None,
             encoder_hidden_states=None,
             encoder_attention_mask=None,
+            output_attentions=None,
+            output_hidden_states=None,
             labels=None,
+            return_dict=None,
     ):
         r"""
         masked_lm_labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size, sequence_length)`, `optional`, defaults to :obj:`None`):
@@ -758,19 +765,24 @@ class NeZhaForMaskedLM(NeZhaPreTrainedModel):
             loss, prediction_scores = outputs[:2]
 
         """
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
         outputs = self.bert(
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             head_mask=head_mask,
+            position_ids=position_ids,
             inputs_embeds=inputs_embeds,
             encoder_hidden_states=encoder_hidden_states,
             encoder_attention_mask=encoder_attention_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
         )
 
         sequence_output = outputs[0]
         prediction_scores = self.cls(sequence_output)
-        outputs = (prediction_scores,) + outputs[2:]  # Add hidden states and attention if they are here
 
         # Although this may seem awkward, BertForMaskedLM supports two scenarios:
         # 1. If a tensor that contains the indices of masked labels is provided,
@@ -778,13 +790,22 @@ class NeZhaForMaskedLM(NeZhaPreTrainedModel):
         #    of predictions for masked words.
         # 2. If `lm_labels` is provided we are in a causal scenario where we
         #    try to predict the next token for each input in the decoder.
-        masked_lm_labels = None
+        masked_lm_loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()  # -100 index = padding token
             masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
-            outputs = (masked_lm_loss,) + outputs
-        return outputs  # (ltr_lm_loss), (masked_lm_loss), prediction_scores, (hidden_states), (attentions)
-
+        
+        if not return_dict:
+            output = (prediction_scores,) + outputs[2:]  # Add hidden states and attention if they are here
+            return ((masked_lm_loss,) + output) if masked_lm_loss is not None else output
+        
+        return MaskedLMOutput(
+            loss=masked_lm_loss,
+            logits=prediction_scores,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
+        )
+        
     def prepare_inputs_for_generation(self, input_ids, attention_mask=None, **model_kwargs):
         input_shape = input_ids.shape
         effective_batch_size = input_shape[0]
