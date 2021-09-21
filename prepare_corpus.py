@@ -25,17 +25,38 @@ def _process(document):
     #     u',.!?[]()<>"\'', u'，。！？【】（）《》“‘')})
     return document
 
-def _split_doc(document):
+def _split_doc(document, max_length=256):
     sentences = re.split(r"[。；;]", document)
+    sentences = list(filter(lambda x: len(x) > 0, sentences))
+    for i, sentence in enumerate(sentences):
+        start_idx = document.find(sentence)
+        end_idx = start_idx + len(sentence)
+        if end_idx == len(document):
+            continue
+        sign = document[end_idx]
+        sentences[i] = sentence + sign
+    if max_length is not None:
+        sentences_new = []
+        sentence_new = ""
+        for sentence in sentences:
+            if len(sentence_new) + len(sentence) > max_length:
+                sentences_new.append(sentence_new)
+                sentence_new = ""
+            sentence_new += sentence
+        if len(sentence_new) > 0:
+            sentences_new.append(sentence_new)
+        sentences = sentences_new
     return sentences
 
 def load_cail2018_corpus(filepaths):
     corpus = []
     for filepath in filepaths:
         with open(filepath, "r", encoding="utf-8") as f:
-            while True:
-                line = f.readline()
-                if line == "": break
+            # while True:
+            #     line = f.readline()
+            #     if line == "": break
+            lines = f.readlines()
+            for line in tqdm(lines, desc=f"{filepath}", total=len(lines)):
                 line = json.loads(line.strip())
                 document = line["fact"].strip()
                 document = _process(document)
@@ -188,7 +209,7 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
     # parser.add_argument("--data_dir", type=str, default="data/")
-    parser.add_argument("--output_dir", type=str, default="data/")
+    parser.add_argument("--output_dir", type=str, default="../cail_processed_data/")
     parser.add_argument("--min_length", type=int, default=20)
     parser.add_argument("--max_length", type=int, default=256)
     parser.add_argument("--train_ratio", type=float, default=0.8)

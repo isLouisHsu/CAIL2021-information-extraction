@@ -12,8 +12,8 @@
  # @FilePath: \CAIL2021-information-extraction\scripts\run_mlm_wwm.sh
 ### 
 
-python prepare_corpus.txt \
-    --output_dir="data/" \
+python prepare_corpus.py \
+    --output_dir=../cail_processed_data/ \
     --min_length=20 \
     --max_length=256 \
     --train_ratio=0.8 \
@@ -22,19 +22,19 @@ python prepare_corpus.txt \
 for data_type in train valid
 do
 python run_chinese_ref.py \
-    --file_name=data/mlm-minlen20-maxlen256-seed42/corpus.${data_type}.txt \
-    --ltp=${TODO:LTP_PATH} \
+    --file_name=../cail_processed_data/mlm-minlen20-maxlen256-seed42/corpus.${data_type}.txt \
+    --ltp=/home/louishsu/NewDisk/Garage/weights/ltp/base1.tgz \
     --bert=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
-    --save_path=data/mlm-minlen20-maxlen256-seed42/ref.${data_type}.txt
+    --save_path=../cail_processed_data/mlm-minlen20-maxlen256-seed42/ref.${data_type}.txt
 done
 
 python run_mlm_wwm.py \
     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
     --model_type=nezha \
-    --train_file=data/mlm-minlen20-maxlen256-seed42/corpus.train.txt \
-    --validation_file=data/mlm-minlen20-maxlen256-seed42/corpus.valid.txt \
-    --train_ref_file=data/mlm-minlen20-maxlen256-seed42/ref.train.txt \
-    --validation_ref_file=data/mlm-minlen20-maxlen256-seed42/ref.valid.txt \
+    --train_file=../cail_processed_data/mlm-minlen20-maxlen256-seed42/corpus.train.txt \
+    --validation_file=../cail_processed_data/mlm-minlen20-maxlen256-seed42/corpus.valid.txt \
+    --train_ref_file=../cail_processed_data/mlm-minlen20-maxlen256-seed42/ref.train.txt \
+    --validation_ref_file=../cail_processed_data/mlm-minlen20-maxlen256-seed42/ref.valid.txt \
     --cache_dir=cache/ \
     --overwrite_cache \
     --max_seq_length=256 \
