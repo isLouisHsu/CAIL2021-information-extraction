@@ -198,6 +198,16 @@ def main(args):
     corpus = list(map(lambda x: x + "\n", corpus))
     with open(os.path.join(args.output_dir, "corpus.txt"), "w", encoding="utf-8") as f:
         f.writelines(corpus)
+    
+    # with open(os.path.join(args.output_dir, "corpus.txt"), "r", encoding="utf-8") as f:
+    #     corpus = f.readlines()
+    # corpus_train_tiny = corpus[:1000]
+    # corpus_valid_tiny = corpus[1000:1200]
+    # with open(os.path.join(args.output_dir, "corpus.train.tiny.txt"), "w", encoding="utf-8") as f:
+    #     f.writelines(corpus_train_tiny)
+    # with open(os.path.join(args.output_dir, "corpus.valid.tiny.txt"), "w", encoding="utf-8") as f:
+    #     f.writelines(corpus_valid_tiny)
+
     num_corpus_train = int(num_corpus * args.train_ratio)
     corpus_train = corpus[: num_corpus_train]
     corpus_valid = corpus[num_corpus_train: ]

@@ -314,6 +314,7 @@ def forward_rdrop(cls, alpha, **kwargs):
         outputs1["logits"], outputs2["logits"], 
         kwargs["span_mask"] == 0)
     total_loss = (outputs1["loss"] + outputs2["loss"]) / 2. + alpha * rdrop_loss
+    # total_loss = (outputs1["loss"] + outputs2["loss"]) + alpha * rdrop_loss
     return TokenClassifierOutput(
         loss=total_loss,
         logits=outputs1["logits"],

@@ -2,6 +2,7 @@ import argparse
 import json
 from typing import List
 
+import jieba
 from tqdm import tqdm, trange
 from ltp import LTP
 from transformers.models.bert.tokenization_bert import BertTokenizer
@@ -80,7 +81,13 @@ def prepare_ref(lines: List[str], ltp_tokenizer: LTP, bert_tokenizer: BertTokeni
     ltp_res = []
 
     for i in trange(0, len(lines), 100):
-        res = ltp_tokenizer.seg(lines[i : i + 100])[0]
+        # ltp
+        # res = ltp_tokenizer.seg(lines[i : i + 100])[0]
+        # jieba
+        res = []
+        for line in lines[i : i + 100]:
+            seg = jieba.lcut(line)
+            res.append(seg)
         res = [get_chinese_word(r) for r in res]
         ltp_res.extend(res)
     assert len(ltp_res) == len(lines)
@@ -120,7 +127,8 @@ def main(args):
     with open(args.file_name, "r", encoding="utf-8") as f:
         data = f.readlines()
     data = [line.strip() for line in data if len(line) > 0 and not line.isspace()]  # avoid delimiter like '\u2029'
-    ltp_tokenizer = LTP(args.ltp)  # faster in GPU device
+    # ltp_tokenizer = LTP(args.ltp)  # faster in GPU device
+    ltp_tokenizer = None
     bert_tokenizer = BertTokenizer.from_pretrained(args.bert)
 
     ref_ids = prepare_ref(data, ltp_tokenizer, bert_tokenizer)

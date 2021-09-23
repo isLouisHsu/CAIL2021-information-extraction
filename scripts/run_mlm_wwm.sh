@@ -28,6 +28,7 @@ python run_chinese_ref.py \
     --save_path=../cail_processed_data/mlm-minlen20-maxlen256-seed42/ref.${data_type}.txt
 done
 
+export WANDB_DISABLED=true
 python run_mlm_wwm.py \
     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
     --model_type=nezha \
@@ -38,7 +39,7 @@ python run_mlm_wwm.py \
     --cache_dir=cache/ \
     --overwrite_cache \
     --max_seq_length=256 \
-    --preprocessing_num_workers=4 \
+    --preprocessing_num_workers=8 \
     --mlm_probability=0.15 \
     --output_dir=output/nezha-legal-cn-base-wwm/ \
     --overwrite_output_dir \
@@ -47,13 +48,13 @@ python run_mlm_wwm.py \
     --max_steps=10000 \
     --evaluation_strategy=steps \
     --eval_steps=500 \
-    --per_device_train_batch_size=8 \
-    --per_device_eval_batch_size=8 \
+    --per_device_train_batch_size=32 \
+    --per_device_eval_batch_size=32 \
     --gradient_accumulation_steps=2 \
     --label_smoothing_factor=0.0 \
     --learning_rate=5e-5 \
     --weight_decay=0.01 \
-    --logging_dir=log/nezha-legal-cn-base-wwm/ \
+    --logging_dir=output/nezha-legal-cn-base-wwm/log/ \
     --logging_strategy=steps \
     --logging_steps=500 \
     --save_strategy=steps \
