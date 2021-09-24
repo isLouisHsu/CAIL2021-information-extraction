@@ -354,6 +354,55 @@ class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
             return forward_rdrop(self, args.rdrop_alpha, **kwargs)
         return forward(self, **kwargs)
 
+
+class ExponentialMovingAverage(object):
+    '''
+    权重滑动平均，对最近的数据给予更高的权重
+    uasge：
+    # 初始化
+    ema = EMA(model, 0.999)
+    # 训练过程中，更新完参数后，同步update shadow weights
+    def train():
+        optimizer.step()
+        ema.update(model)
+    # eval前，apply shadow weights；
+    # eval之后（保存模型后），恢复原来模型的参数
+    def evaluate():
+        ema.apply_shadow(model)
+        # evaluate
+        ema.restore(modle)
+    '''
+    def __init__(self,model, decay, device):
+        self.decay = decay
+        self.device = device
+        self.shadow = {}
+        self.backup = {}
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                self.shadow[name] = param.data.clone().cpu()
+
+    def update(self,model):
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                assert name in self.shadow
+                new_average = (1.0 - self.decay) * param.data.cpu() + self.decay * self.shadow[name]
+                self.shadow[name] = new_average.clone()
+
+    def apply_shadow(self,model):
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                assert name in self.shadow
+                self.backup[name] = param.data.cpu()
+                param.data = self.shadow[name].to(self.device)
+
+    def restore(self,model):
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                assert name in self.backup
+                param.data = self.backup[name].to(self.device)
+        self.backup = {}
+
+
 class NerArgumentParser(ArgumentParser):
 
     def __init__(self, **kwargs):
@@ -399,6 +448,7 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--augment_entity_replace_p", default=None, type=float)
         self.add_argument("--rdrop_alpha", default=None, type=float)
         self.add_argument("--vat_alpha", default=None, type=float)
+        self.add_argument("--do_ema", action="store_true")
         
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
@@ -855,6 +905,8 @@ def train(args, model, processor, tokenizer):
                                                           find_unused_parameters=True)
     if args.do_fgm:
         fgm = FGM(model, emb_name=args.fgm_name, epsilon=args.fgm_epsilon)
+    if args.do_ema:
+        ema = ExponentialMovingAverage(model, decay=0.999, device=args.device)
     # Train!
     logger.info("***** Running training *****")
     logger.info("  Num examples = %d", len(train_dataset))
@@ -937,6 +989,8 @@ def train(args, model, processor, tokenizer):
                 optimizer.step()
                 scheduler.step()  # Update learning rate schedule
                 model.zero_grad()
+                if args.do_ema:
+                    ema.update(model)
                 global_step += 1
                 if args.local_rank in [-1, 0] and args.evaluate_during_training and \
                     args.logging_steps > 0 and global_step % args.logging_steps == 0:
@@ -967,6 +1021,23 @@ def train(args, model, processor, tokenizer):
                                 torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
                                 torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
                                 logger.info("Saving optimizer and scheduler states to %s", output_dir)
+
+                            if args.do_ema:
+                                logger.info("{:*^50s}".format("EMA"))
+                                ema.apply_shadow(model)
+                                eval_results_ema = evaluate(args, model, processor, tokenizer)
+                                logger.info(f"[{epoch_no}] loss={eval_results_ema.pop('loss')}")
+                                for entity, metrics in eval_results_ema.items():
+                                    logger.info("{:*^50s}".format(entity))
+                                    logger.info("\t".join(f"{metric:s}={value:f}" 
+                                        for metric, value in metrics.items()))
+                                if eval_results_ema["avg"]["f"] > best_f1:
+                                    model_to_save = (
+                                        model.module if hasattr(model, "module") else model
+                                    )  # Take care of distributed/parallel training
+                                    model_to_save.save_pretrained(output_dir)
+                                ema.restore(model)
+                                
                 elif args.local_rank in [-1, 0] and \
                         args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
@@ -1029,17 +1100,29 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
         nb_eval_steps += 1
         
         # calculate metrics
-        preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"])
-        for pred_no, (pred, input_len, start, end) in enumerate(zip(
-                preds, batch["input_len"], batch["sent_start"], batch["sent_end"])):
-            pred = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in pred if id2label[t] != "O"]
-            pred = [(t, b - start, e - start) for t, b, e in pred]
-            sample = eval_dataset.examples[args.eval_batch_size * step + pred_no][1]
-            label_entities_map = {v: [] for v in LABEL_MEANING_MAP.values()}
-            for t, b, e in pred:
-                label_entities_map[t].append(f"{b};{e+1}")
-            entities = [{"label": k, "span": v} for k, v in label_entities_map.items()]
-            y_pred.append({"id": sample["id"].split("-")[-1], "entities": entities})
+        # preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"])
+        # for pred_no, (pred, input_len, start, end) in enumerate(zip(
+        #         preds, batch["input_len"], batch["sent_start"], batch["sent_end"])):
+        #     pred = [(LABEL_MEANING_MAP[id2label[t]], b, e) for t, b, e in pred if id2label[t] != "O"]
+        #     pred = [(t, b - start, e - start) for t, b, e in pred]
+        #     sample = eval_dataset.examples[args.eval_batch_size * step + pred_no][1]
+        #     label_entities_map = {v: [] for v in LABEL_MEANING_MAP.values()}
+        #     for t, b, e in pred:
+        #         label_entities_map[t].append(f"{b};{e+1}")
+        #     entities = [{"label": k, "span": v} for k, v in label_entities_map.items()]
+        #     y_pred.append({"id": sample["id"].split("-")[-1], "entities": entities})
+
+        # evaluate函数解码替换为与test一致
+        for pred_no in range(logits.size(0)):
+            example_ = eval_dataset.examples[args.eval_batch_size * step + pred_no][1]
+            batch_ = {k: v[[pred_no]] for k,v in batch.items()}
+            batch_["logits"] = logits[[pred_no]]
+            y_pred_ = predict_decode_batch(example_, batch_, id2label, post_process=True)
+            for entity_no, entity in enumerate(y_pred_["entities"]):
+                y_pred_["entities"][entity_no] = {
+                    "label": LABEL_MEANING_MAP[entity["label"]],
+                    "span": entity["span"]}
+            y_pred.append(y_pred_)
 
         labels = SpanV2.decode_batch(batch["label"], batch["spans"], batch["span_mask"], is_logits=False)
         for label_no, (label, input_len, start, end) in enumerate(zip(
@@ -1389,6 +1472,7 @@ if __name__ == "__main__":
         # 将early stop模型保存到输出目录下
         if args.save_best_checkpoints:
             best_checkpoints = os.path.join(args.output_dir, "checkpoint-999999")
+            logger.info("Loading model checkpoint from %s", best_checkpoints)
             config = config_class.from_pretrained(best_checkpoints,
                                                   num_labels=num_labels, max_span_length=args.max_span_length,
                                                   cache_dir=args.cache_dir if args.cache_dir else None, )

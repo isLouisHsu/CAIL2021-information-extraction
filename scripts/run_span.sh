@@ -363,7 +363,7 @@ done
 # 组织机构
 # {'p': 0.8795336787564767, 'r': 0.8424317617866005, 'f': 0.8605830164765527}
 
-# TODO: context-aware，仅增强分类性能较差的“受害人、犯罪嫌疑人”
+# context-aware，仅增强分类性能较差的“受害人、犯罪嫌疑人”
 for k in 0 1 2 3 4
 do
 python run_span.py \
@@ -419,48 +419,107 @@ done
 # 组织机构
 # {'p': 0.8423586040914561, 'r': 0.8684863523573201, 'f': 0.855222968845449}
 
+# LSR
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-fgm1.0-lsr0.1-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=8.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --seed=42
+done
+# main_local
+# avg
+# {'p': 0.8992657967816792, 'r': 0.8866509133190803, 'f': 0.8929138022210471}
+# 犯罪嫌疑人
+# {'p': 0.9609907120743034, 'r': 0.9605446387126721, 'f': 0.9607676236168073}
+# 受害人
+# {'p': 0.9242566510172144, 'r': 0.9501287001287001, 'f': 0.9370141202601936}
+# 被盗货币
+# {'p': 0.8159574468085107, 'r': 0.8382513661202186, 'f': 0.8269541778975741}
+# 物品价值
+# {'p': 0.9697696737044146, 'r': 0.9669856459330144, 'f': 0.9683756588404409}
+# 盗窃获利
+# {'p': 0.8627450980392157, 'r': 0.9147609147609148, 'f': 0.8879919273461151}
+# 被盗物品
+# {'p': 0.8217407137654771, 'r': 0.7806607853312576, 'f': 0.8006741772376476}
+# 作案工具
+# {'p': 0.801994301994302, 'r': 0.7659863945578231, 'f': 0.7835768963117605}
+# 时间
+# {'p': 0.9488699518340126, 'r': 0.9262206148282097, 'f': 0.9374084919472914}
+# 地点
+# {'p': 0.861102919492775, 'r': 0.8302530565823145, 'f': 0.8453966415749856}
+# 组织机构
+# {'p': 0.8513513513513513, 'r': 0.8598014888337469, 'f': 0.8555555555555555}
+
+# TODO: 全部数据
+
+# TODO: EMA
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-fgm1.0-ema0.999-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=4.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --do_ema \
+    --seed=42
+done
+
 # TODO: albert
 # TODO: distill
 # TODO: further pretrain，加入别的赛道数据
 # TODO: 伪标签，别的赛道数据作为无标签数据
 # TODO: 往年数据
+# TODO: TTA
 
 # <<< 第二阶段 <<<
 
 # ==================================================================================================================
-# TODO: label smooth 0.1
-# for k in 0 1 2 3 4
-# do
-# python run_span.py \
-#     --version=nezha-rdrop0.1-fgm1.0-lsr0.1-fold${k} \
-#     --data_dir=./data/ner-ctx0-5fold-seed42/ \
-#     --train_file=train.${k}.json \
-#     --dev_file=dev.${k}.json \
-#     --test_file=dev.${k}.json \
-#     --model_type=nezha_span \
-#     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
-#     --do_train \
-#     --overwrite_output_dir \
-#     --evaluate_during_training \
-#     --evaluate_each_epoch \
-#     --save_best_checkpoints \
-#     --max_span_length=40 \
-#     --width_embedding_dim=128 \
-#     --train_max_seq_length=512 \
-#     --eval_max_seq_length=512 \
-#     --do_lower_case \
-#     --per_gpu_train_batch_size=8 \
-#     --per_gpu_eval_batch_size=16 \
-#     --gradient_accumulation_steps=2 \
-#     --learning_rate=5e-5 \
-#     --other_learning_rate=1e-3 \
-#     --num_train_epochs=4.0 \
-#     --warmup_proportion=0.1 \
-#     --rdrop_alpha=0.1 \
-#     --do_fgm --fgm_epsilon=1.0 \
-#     --loss_type=lsr --label_smooth_eps=0.1 \
-#     --seed=42
-# done
 
 # for k in 0 1 2 3 4
 # do

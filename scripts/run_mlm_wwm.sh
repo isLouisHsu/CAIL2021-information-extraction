@@ -91,13 +91,10 @@ nohup python run_mlm_wwm.py \
     --mlm_probability=0.15 \
     --output_dir=output/nezha-legal-cn-base-wwm/ \
     --overwrite_output_dir \
-    --do_train --do_eval \
-    --warmup_steps=1000 \
+    --do_train \
+    --warmup_steps=1500 \
     --max_steps=30000 \
-    --evaluation_strategy=steps \
-    --eval_steps=1500 \
     --per_device_train_batch_size=48 \
-    --per_device_eval_batch_size=48 \
     --gradient_accumulation_steps=4 \
     --label_smoothing_factor=0.0 \
     --learning_rate=5e-5 \

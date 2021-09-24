@@ -48,7 +48,13 @@ def main():
     # n_splits = 5
     # seed=42
     # --------------------------
-    version = "nezha-rdrop0.1-fgm1.0-aug_ctx0.15"
+    # version = "nezha-rdrop0.1-fgm1.0-aug_ctx0.15"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    version = "nezha-fgm1.0-lsr0.1"
     model_type = "nezha_span"
     dataset_name = "cail_ner"
     n_splits = 5
