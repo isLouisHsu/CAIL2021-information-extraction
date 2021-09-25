@@ -48,7 +48,13 @@ def main():
     # n_splits = 5
     # seed=42
     # --------------------------
-    version = "nezha-fgm1.0-lsr0.1"
+    # version = "nezha-fgm1.0-lsr0.1"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    version = "nezha-legal-fgm1.0-lsr0.1"
     model_type = "nezha_span"
     dataset_name = "cail_ner"
     n_splits = 5
@@ -56,8 +62,11 @@ def main():
 
     test_examples = None
     test_batches = None
-    for k in range(n_splits):
-        model_path = f"./output/ner-{dataset_name}-{model_type}-{version}-fold{k}-{seed}/"
+    # for k in range(n_splits):
+    #     model_path = f"./output/ner-{dataset_name}-{model_type}-{version}-fold{k}-{seed}/"
+    model_paths = [f"./output/ner-{dataset_name}-{model_type}-{version}-fold{k}-{seed}/" for k in range(n_splits)]
+    for k in range(len(model_paths)):
+        model_path = model_paths[k]
         # 生成测试运行参数
         json_file = os.path.join(model_path, "training_args.json")
         parser = NerArgumentParser()
