@@ -379,20 +379,23 @@ class ExponentialMovingAverage(object):
         self.backup = {}
         for name, param in model.named_parameters():
             if param.requires_grad:
-                self.shadow[name] = param.data.clone().cpu()
+                # self.shadow[name] = param.data.clone().cpu()  # 显存内存数值拷贝对精度影响较大
+                self.shadow[name] = param.data.clone()
 
     def update(self,model):
         for name, param in model.named_parameters():
             if param.requires_grad:
                 assert name in self.shadow
-                new_average = (1.0 - self.decay) * param.data.cpu() + self.decay * self.shadow[name]
+                # new_average = (1.0 - self.decay) * param.data.cpu() + self.decay * self.shadow[name]
+                new_average = (1.0 - self.decay) * param.data + self.decay * self.shadow[name]
                 self.shadow[name] = new_average.clone()
 
     def apply_shadow(self,model):
         for name, param in model.named_parameters():
             if param.requires_grad:
                 assert name in self.shadow
-                self.backup[name] = param.data.cpu()
+                # self.backup[name] = param.data.cpu()
+                self.backup[name] = param.data
                 param.data = self.shadow[name].to(self.device)
 
     def restore(self,model):
@@ -449,6 +452,7 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--rdrop_alpha", default=None, type=float)
         self.add_argument("--vat_alpha", default=None, type=float)
         self.add_argument("--do_ema", action="store_true")
+        self.add_argument("--ema_start_epoch", default=None, type=int)
         
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
@@ -906,7 +910,7 @@ def train(args, model, processor, tokenizer):
     if args.do_fgm:
         fgm = FGM(model, emb_name=args.fgm_name, epsilon=args.fgm_epsilon)
     if args.do_ema:
-        ema = ExponentialMovingAverage(model, decay=0.999, device=args.device)
+        ema = None
     # Train!
     logger.info("***** Running training *****")
     logger.info("  Num examples = %d", len(train_dataset))
@@ -938,6 +942,9 @@ def train(args, model, processor, tokenizer):
     seed_everything(args.seed)  # Added here for reproductibility (even between python 2 and 3)
     for epoch_no in range(int(args.num_train_epochs)):
         pbar = tqdm(enumerate(train_dataloader), total=len(train_dataloader), desc='Training...')
+        if args.do_ema and ema is None and epoch_no >= args.ema_start_epoch:
+            logger.info("Start doing Exponential Moving Averaging(EMA).")
+            ema = ExponentialMovingAverage(model, decay=0.999, device=args.device)
         for step, batch in pbar:
             # Skip past any already trained steps if resuming training
             if steps_trained_in_current_epoch > 0:
@@ -989,7 +996,7 @@ def train(args, model, processor, tokenizer):
                 optimizer.step()
                 scheduler.step()  # Update learning rate schedule
                 model.zero_grad()
-                if args.do_ema:
+                if args.do_ema and ema is not None:
                     ema.update(model)
                 global_step += 1
                 if args.local_rank in [-1, 0] and args.evaluate_during_training and \
@@ -1022,7 +1029,7 @@ def train(args, model, processor, tokenizer):
                                 torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
                                 logger.info("Saving optimizer and scheduler states to %s", output_dir)
 
-                            if args.do_ema:
+                            if args.do_ema and ema is not None:
                                 logger.info("{:*^50s}".format("EMA"))
                                 ema.apply_shadow(model)
                                 eval_results_ema = evaluate(args, model, processor, tokenizer)
@@ -1036,6 +1043,7 @@ def train(args, model, processor, tokenizer):
                                         model.module if hasattr(model, "module") else model
                                     )  # Take care of distributed/parallel training
                                     model_to_save.save_pretrained(output_dir)
+                                    logger.info("Saving model checkpoint to %s", output_dir)
                                 ema.restore(model)
                                 
                 elif args.local_rank in [-1, 0] and \
