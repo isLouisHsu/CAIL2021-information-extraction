@@ -1256,31 +1256,31 @@ def predict_decode_batch(example, batch, id2label, post_process=True):
             entities = spans2entities(spans)
             label_entities_map[label] = entities
 
-        # # TODO: 1. 若存在被盗货币实体重叠，保留最长的；2. 被盗货币要和人名联系
-        # meaning = "被盗货币"
-        # label = MEANING_LABEL_MAP[meaning]
-        # entities = label_entities_map[label]                            # 左闭右开
-        # if entities:
-        #     spans = entities2spans(entities)
-        #     spans = list(filter(lambda x: not is_contain_special_char(x), spans))
-        #     # # TODO: >>> 姓名处理 >>>
-        #     # entities_name = label_entities_map[MEANING_LABEL_MAP["受害人"]]
-        #     # spans_name = entities2spans(entities_name)
-        #     # # 加入`受害人+被盗货币`的组合
-        #     # spans.extend([(a[0], b[1]) for a, b in itertools.product(
-        #     #     spans_name, spans) if a[1] - b[0] in [-1, 0]])
-        #     # # `受害人+被盗货币`、`被盗货币`，优先保留`受害人+被盗货币`
-        #     # is_todel = [False] * len(spans)
-        #     # for i, a in enumerate(spans_name):
-        #     #     for j, b in enumerate(spans):
-        #     #         u = (a[0], b[1])
-        #     #         if u in spans and u != b:
-        #     #             is_todel[j] = True
-        #     # spans = [span for flag, span in zip(is_todel, spans) if not flag]
-        #     # # <<< 姓名处理 <<<
-        #     spans = merge_spans(spans, keep_type="long")
-        #     entities = spans2entities(spans)
-        #     label_entities_map[label] = entities
+        # 1. 若存在被盗货币实体重叠，保留最长的；2. 被盗货币要和人名联系
+        meaning = "被盗货币"
+        label = MEANING_LABEL_MAP[meaning]
+        entities = label_entities_map[label]                            # 左闭右开
+        if entities:
+            spans = entities2spans(entities)
+            spans = list(filter(lambda x: not is_contain_special_char(x), spans))
+            # # TODO: >>> 姓名处理 >>>
+            # entities_name = label_entities_map[MEANING_LABEL_MAP["受害人"]]
+            # spans_name = entities2spans(entities_name)
+            # # 加入`受害人+被盗货币`的组合
+            # spans.extend([(a[0], b[1]) for a, b in itertools.product(
+            #     spans_name, spans) if a[1] - b[0] in [-1, 0]])
+            # # `受害人+被盗货币`、`被盗货币`，优先保留`受害人+被盗货币`
+            # is_todel = [False] * len(spans)
+            # for i, a in enumerate(spans_name):
+            #     for j, b in enumerate(spans):
+            #         u = (a[0], b[1])
+            #         if u in spans and u != b:
+            #             is_todel[j] = True
+            # spans = [span for flag, span in zip(is_todel, spans) if not flag]
+            # # <<< 姓名处理 <<<
+            spans = merge_spans(spans, keep_type="long")
+            entities = spans2entities(spans)
+            label_entities_map[label] = entities
 
         # 受害人和犯罪嫌疑人设置最长实体限制(10)
         for meaning in ["受害人", "犯罪嫌疑人"]:
