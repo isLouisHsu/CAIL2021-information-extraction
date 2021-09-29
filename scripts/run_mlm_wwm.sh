@@ -126,7 +126,7 @@ nohup python run_mlm_wwm.py \
     --do_train \
     --warmup_steps=1500 \
     --max_steps=100000 \
-    --per_device_train_batch_size=48 \
+    --per_device_train_batch_size=64 \
     --gradient_accumulation_steps=4 \
     --label_smoothing_factor=0.0 \
     --learning_rate=5e-5 \
