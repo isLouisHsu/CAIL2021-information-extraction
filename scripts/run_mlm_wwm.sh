@@ -66,46 +66,78 @@
 # >> output/nezha-legal-cn-base-wwm.out &
 
 # ================================================================================================
-python prepare_corpus.py \
-    --output_dir=../cail_processed_data/ \
-    --min_length=30 \
-    --max_length=256 \
-    --seed=42
+# python prepare_corpus.py \
+#     --output_dir=../cail_processed_data/ \
+#     --min_length=30 \
+#     --max_length=256 \
+#     --seed=42
 
-python run_chinese_ref.py \
-    --file_name=../cail_processed_data/mlm-minlen30-maxlen256-seed42/corpus.txt \
-    --ltp=/home/louishsu/NewDisk/Garage/weights/ltp/base1.tgz \
-    --bert=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
-    --save_path=../cail_processed_data/mlm-minlen30-maxlen256-seed42/ref.txt
+# python run_chinese_ref.py \
+#     --file_name=../cail_processed_data/mlm-minlen30-maxlen256-seed42/corpus.txt \
+#     --ltp=/home/louishsu/NewDisk/Garage/weights/ltp/base1.tgz \
+#     --bert=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+#     --save_path=../cail_processed_data/mlm-minlen30-maxlen256-seed42/ref.txt
 
 export WANDB_DISABLED=true
+# nohup python run_mlm_wwm.py \
+#     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+#     --model_type=nezha \
+#     --train_file=../cail_processed_data/mlm-minlen30-maxlen256-seed42/corpus.txt \
+#     --train_ref_file=../cail_processed_data/mlm-minlen30-maxlen256-seed42/ref.txt \
+#     --cache_dir=cache/ \
+#     --overwrite_cache \
+#     --max_seq_length=256 \
+#     --preprocessing_num_workers=8 \
+#     --mlm_probability=0.15 \
+#     --output_dir=output/nezha-legal-cn-base-wwm/ \
+#     --overwrite_output_dir \
+#     --do_train \
+#     --warmup_steps=1500 \
+#     --max_steps=30000 \
+#     --per_device_train_batch_size=48 \
+#     --gradient_accumulation_steps=4 \
+#     --label_smoothing_factor=0.0 \
+#     --learning_rate=5e-5 \
+#     --weight_decay=0.01 \
+#     --logging_dir=output/nezha-legal-cn-base-wwm/log/ \
+#     --logging_strategy=steps \
+#     --logging_steps=1500 \
+#     --save_strategy=steps \
+#     --save_steps=1500 \
+#     --save_total_limit=10 \
+#     --dataloader_num_workers=4 \
+#     --seed=42 \
+#     --fp16 \
+# >> output/nezha-legal-cn-base-wwm.out &
+
+# 100k
 nohup python run_mlm_wwm.py \
-    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --model_name_or_path=../CAIL2021/nezha-legal-cn-base-wwm/ \
     --model_type=nezha \
     --train_file=../cail_processed_data/mlm-minlen30-maxlen256-seed42/corpus.txt \
     --train_ref_file=../cail_processed_data/mlm-minlen30-maxlen256-seed42/ref.txt \
     --cache_dir=cache/ \
     --overwrite_cache \
     --max_seq_length=256 \
-    --preprocessing_num_workers=8 \
+    --preprocessing_num_workers=4 \
     --mlm_probability=0.15 \
-    --output_dir=output/nezha-legal-cn-base-wwm/ \
+    --output_dir=output/nezha-legal-cn-base-wwm-100k/ \
     --overwrite_output_dir \
     --do_train \
     --warmup_steps=1500 \
-    --max_steps=30000 \
+    --max_steps=100000 \
     --per_device_train_batch_size=48 \
     --gradient_accumulation_steps=4 \
     --label_smoothing_factor=0.0 \
     --learning_rate=5e-5 \
     --weight_decay=0.01 \
-    --logging_dir=output/nezha-legal-cn-base-wwm/log/ \
+    --logging_dir=output/nezha-legal-cn-base-wwm-100k/log/ \
     --logging_strategy=steps \
-    --logging_steps=1500 \
+    --logging_steps=2500 \
     --save_strategy=steps \
-    --save_steps=1500 \
-    --save_total_limit=10 \
+    --save_steps=2500 \
+    --save_total_limit=20 \
     --dataloader_num_workers=4 \
     --seed=42 \
     --fp16 \
->> output/nezha-legal-cn-base-wwm.out &
+>> output/nezha-legal-cn-base-wwm-100k.out &
