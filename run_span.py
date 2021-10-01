@@ -217,15 +217,20 @@ class SpanV2Loss(nn.Module):
         if args.do_pseudo:
             proba = logits.softmax(dim=-1)
             proba, index = proba.max(dim=-1)
-            condition = (
-                label > args.pseudo_proba_ub
-            ) | (
-                label < args.pseudo_proba_lb
-            ) & (
-                label == PSEUDO_TAG
-            )
-            label = torch.where(condition, index, label)
-            loss_mask = loss_mask & (label.view(-1) != PSEUDO_TAG)
+
+            is_pseudo = label == PSEUDO_TAG
+            label = torch.where(is_pseudo, index, label)        # 用预测标签替换无标签
+            pseudo_valid_mask = is_pseudo & (
+                proba > args.pseudo_proba_thresh
+            )                                                   # 有效伪标签：是伪标签、且大于阈值
+            # pseudo_valid_mask = is_pseudo & (
+            #     proba > args.pseudo_proba_thresh
+            # ) & (
+            #     index != 0
+            # )                                                   # 有效伪标签：是伪标签、且大于阈值、是实体
+            loss_mask = (mask == 1) & (~is_pseudo)              # 重新初始化loss_mask：真实标签
+            loss_mask = loss_mask | pseudo_valid_mask           # 合并`真实标签`和`有效伪标签`
+            loss_mask = loss_mask.view(-1)
 
         loss = self.loss_fct(logits.view(-1, num_labels), label.view(-1))
         loss = loss[loss_mask].mean()
@@ -474,8 +479,7 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--pseudo_data_dir", default=None, type=str)
         self.add_argument("--pseudo_data_file", default=None, type=str)
         self.add_argument("--pseudo_num_sample", default=None, type=int)
-        self.add_argument("--pseudo_proba_ub", default=0.99, type=float)
-        self.add_argument("--pseudo_proba_lb", default=0.01, type=float)
+        self.add_argument("--pseudo_proba_thresh", default=0.99, type=float)
 
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
@@ -606,6 +610,10 @@ class CailNerProcessor(NerProcessor):
         logger.info(f"Creating examples from {data_path}...")
         with open(data_path, encoding="utf-8") as f:
             lines = [json.loads(line) for line in f.readlines()]
+        # 无标签数据数量限制
+        if mode == "pseudo" and args.pseudo_num_sample is not None:
+            random.shuffle(lines)
+            lines = lines[:args.pseudo_num_sample]
         logger.info(f"Totally {len(lines)} examples.")
         for sentence_counter, line in enumerate(lines):
             sentence = (
@@ -1417,9 +1425,6 @@ def load_dataset(args, processor, tokenizer, data_type='train'):
     elif data_type == 'pseudo':
         examples = processor.get_train_examples(args.data_dir, args.train_file)
         examples_pseudo = processor.get_pseudo_examples(args.pseudo_data_dir, args.pseudo_data_file)
-        if args.pseudo_num_sample is not None:
-            random.shuffle(examples_pseudo)
-            examples_pseudo = examples_pseudo[:args.pseudo_num_sample]
         examples.extend(examples_pseudo)
     if args.local_rank == 0 and not evaluate:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache

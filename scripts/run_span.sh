@@ -582,7 +582,7 @@ python prepare_data.py \
 for k in 0 1 2 3 4
 do
 python run_span.py \
-    --version=nezha-legal-fgm1.0-lsr0.1-pseudo_u0.99_l0.01-fold${k} \
+    --version=nezha-legal-fgm1.0-lsr0.1-pseudo_t0.9-fold${k} \
     --data_dir=./data/ner-ctx0-5fold-seed42/ \
     --train_file=train.${k}.json \
     --dev_file=dev.${k}.json \
@@ -602,18 +602,17 @@ python run_span.py \
     --per_gpu_train_batch_size=8 \
     --per_gpu_eval_batch_size=16 \
     --gradient_accumulation_steps=2 \
-    --learning_rate=1e-6 \
-    --other_learning_rate=1e-6 \
-    --num_train_epochs=2.0 \
+    --learning_rate=1e-5 \
+    --other_learning_rate=1e-5 \
+    --num_train_epochs=1.0 \
     --warmup_proportion=0.1 \
     --do_fgm --fgm_epsilon=1.0 \
     --loss_type=lsr --label_smooth_eps=0.1 \
     --do_pseudo \
     --pseudo_data_dir=../cail_processed_data/ner-ctx0-1fold-seed42/ \
     --pseudo_data_file=train.json \
-    --pseudo_num_sample=2000 \
-    --pseudo_proba_ub=0.99 \
-    --pseudo_proba_lb=0.01 \
+    --pseudo_num_sample=1500 \
+    --pseudo_proba_thresh=0.9 \
     --seed=42
 done
 
