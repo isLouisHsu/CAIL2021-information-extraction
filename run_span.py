@@ -49,6 +49,8 @@ from seqeval.metrics.sequence_labeling import (
 from evaluate import score
 from utils import LABEL_MEANING_MAP, MEANING_LABEL_MAP, get_ner_tags
 
+PSEUDO_TAG = -1
+
 class BertConfigSpanV2(BertConfig):
 
     def __init__(self, 
@@ -211,6 +213,20 @@ class SpanV2Loss(nn.Module):
     ):
         num_labels = logits.size(-1)
         loss_mask = mask.view(-1) == 1
+
+        if args.do_pseudo:
+            proba = logits.softmax(dim=-1)
+            proba, index = proba.max(dim=-1)
+            condition = (
+                label > args.pseudo_proba_ub
+            ) | (
+                label < args.pseudo_proba_lb
+            ) & (
+                label == PSEUDO_TAG
+            )
+            label = torch.where(condition, index, label)
+            loss_mask = loss_mask & (label.view(-1) != PSEUDO_TAG)
+
         loss = self.loss_fct(logits.view(-1, num_labels), label.view(-1))
         loss = loss[loss_mask].mean()
         return loss
@@ -453,7 +469,14 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--vat_alpha", default=None, type=float)
         self.add_argument("--do_ema", action="store_true")
         self.add_argument("--ema_start_epoch", default=None, type=int)
-        
+
+        self.add_argument("--do_pseudo", action="store_true")
+        self.add_argument("--pseudo_data_dir", default=None, type=str)
+        self.add_argument("--pseudo_data_file", default=None, type=str)
+        self.add_argument("--pseudo_num_sample", default=None, type=int)
+        self.add_argument("--pseudo_proba_ub", default=0.99, type=float)
+        self.add_argument("--pseudo_proba_lb", default=0.01, type=float)
+
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
                             choices=['IOB2', 'IOBES'])
@@ -551,6 +574,10 @@ class NerProcessor(DataProcessor):
     def get_test_examples(self, data_dir, data_file):
         """Gets a collection of :class:`InputExample` for the test set."""
         return list(self._create_examples(data_dir, data_file, 'test'))
+
+    def get_pseudo_examples(self, data_dir, data_file):
+        """Gets a collection of :class:`InputExample` for the pseudo set."""
+        return list(self._create_examples(data_dir, data_file, 'pseudo'))
     
     @property
     def label2id(self):
@@ -576,21 +603,23 @@ class CailNerProcessor(NerProcessor):
     
     def _create_examples(self, data_dir, data_file, mode):
         data_path = os.path.join(data_dir, data_file)
+        logger.info(f"Creating examples from {data_path}...")
         with open(data_path, encoding="utf-8") as f:
             lines = [json.loads(line) for line in f.readlines()]
-            for sentence_counter, line in enumerate(lines):
-                sentence = (
-                    sentence_counter,
-                    {
-                        "id": f"{mode}-{str(line['id'])}",
-                        "tokens": list(line["text"]),
-                        "entities": line.get("entities", None) 
-                            if mode in ["train", "dev"] else None,
-                        "sent_start": line["sent_start"],
-                        "sent_end": line["sent_end"],
-                    }
-                )
-                yield sentence
+        logger.info(f"Totally {len(lines)} examples.")
+        for sentence_counter, line in enumerate(lines):
+            sentence = (
+                sentence_counter,
+                {
+                    "id": f"{mode}-{str(line['id'])}",
+                    "tokens": list(line["text"]),
+                    "entities": line.get("entities", None) 
+                        if mode in ["train", "dev"] else None,
+                    "sent_start": line["sent_start"],
+                    "sent_end": line["sent_end"],
+                }
+            )
+            yield sentence
 
 class NerDataset(torch.utils.data.Dataset):
 
@@ -749,8 +778,7 @@ class Example2Feature:
         span_mask = torch.tensor([span_mask])       # (1, num_spans)
         return spans, span_mask
 
-    def _encode_label(self, entities, spans):
-        tag_o = self.label2id["O"]
+    def _encode_label(self, entities, spans, tag_o):
         entities = {(b + 1, e + 1): self.label2id[t] for t, b, e, _ in entities}
         label = [entities.get((b, e), tag_o) for b, e, l in spans[0]]
         label = torch.tensor([label])               # (1, num_spans)
@@ -781,13 +809,21 @@ class Example2Feature:
         inputs["sent_start"] = torch.tensor([sent_start])
         inputs["sent_end"] = torch.tensor([sent_end])
         
+        tag_o = self.label2id["O"]
+
+        if args.do_pseudo:
+            is_pseudo_example = id_.startswith("pseudo")
+            if is_pseudo_example:
+                entities = []
+                tag_o = PSEUDO_TAG
+
         if entities is None:
             inputs["label"] = None
             return inputs
 
         # encode label
         inputs["label"] = self._encode_label(entities, 
-            inputs["spans"].cpu().numpy().tolist())
+            inputs["spans"].cpu().numpy().tolist(), tag_o)
         return inputs
 
 class FGM():
@@ -855,7 +891,7 @@ def init_logger(name, log_file='', log_file_level=logging.NOTSET):
 
 def train(args, model, processor, tokenizer):
     """ Train the model """
-    train_dataset = load_dataset(args, processor, tokenizer, data_type='train')
+    train_dataset = load_dataset(args, processor, tokenizer, data_type="pseudo" if args.do_pseudo else 'train')
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size,
@@ -1376,8 +1412,15 @@ def load_dataset(args, processor, tokenizer, data_type='train'):
         examples = processor.get_train_examples(args.data_dir, args.train_file)
     elif data_type == 'dev':
         examples = processor.get_dev_examples(args.data_dir, args.dev_file)
-    else:
+    elif data_type == "test":
         examples = processor.get_test_examples(args.data_dir, args.test_file)
+    elif data_type == 'pseudo':
+        examples = processor.get_train_examples(args.data_dir, args.train_file)
+        examples_pseudo = processor.get_pseudo_examples(args.pseudo_data_dir, args.pseudo_data_file)
+        if args.pseudo_num_sample is not None:
+            random.shuffle(examples_pseudo)
+            examples_pseudo = examples_pseudo[:args.pseudo_num_sample]
+        examples.extend(examples_pseudo)
     if args.local_rank == 0 and not evaluate:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
     max_seq_length = args.train_max_seq_length if data_type == 'train' else args.eval_max_seq_length

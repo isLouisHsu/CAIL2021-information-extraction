@@ -78,7 +78,7 @@ def load_cail2018_corpus(filepaths):
                 document = _process(document)
                 document = _strip(document)
                 sentences = _split_doc(document)
-                sentences = [sentence + "。" for sentence in sentences if len(sentence) > 0]
+                sentences = [sentence.rstrip("。") + "。" for sentence in sentences if len(sentence) > 0]
                 corpus.extend(sentences)
     print(f"{sys._getframe().f_code.co_name} #{len(corpus)}")
     return corpus

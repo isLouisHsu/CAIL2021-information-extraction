@@ -565,6 +565,58 @@ python run_span.py \
     --seed=42
 done
 
+# pseudo label
+python prepare_pseudo.py \
+    --output_dir=../cail_processed_data/ \
+    --min_length=30 \
+    --max_len=256 \
+    --raw_files \
+        ../cail_raw_data/2018/CAIL2018_ALL_DATA/final_all_data/restData/rest_data.json \
+    --seed=42
+python prepare_data.py \
+    --data_files ../cail_processed_data/pseudo-minlen30-maxlen256-seed42/xxcq_pseudo.json \
+    --context_window 0 \
+    --n_splits 1 \
+    --output_dir data/ \
+    --seed 42
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-legal-fgm1.0-lsr0.1-pseudo_u0.99_l0.01-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=../CAIL2021/ner-cail_ner-nezha_span-nezha-legal-fgm1.0-lsr0.1-fold${k}-42/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=1e-6 \
+    --other_learning_rate=1e-6 \
+    --num_train_epochs=2.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --do_pseudo \
+    --pseudo_data_dir=../cail_processed_data/ner-ctx0-1fold-seed42/ \
+    --pseudo_data_file=train.json \
+    --pseudo_num_sample=2000 \
+    --pseudo_proba_ub=0.99 \
+    --pseudo_proba_lb=0.01 \
+    --seed=42
+done
+
 # TODO: 全部数据
 
 # TODO: EMA
