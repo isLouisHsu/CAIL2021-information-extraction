@@ -35,7 +35,7 @@ from nezha.modeling_nezha import NeZhaModel, NeZhaPreTrainedModel
 from nezha.modeling_nezha import relative_position_encoding
 
 # trainer & training arguments
-from transformers import AdamW, get_linear_schedule_with_warmup
+from transformers import AdamW, get_linear_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
 from lamb import Lamb
 
 # metrics
@@ -467,6 +467,7 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument("--max_span_length", default=50, type=int)
         self.add_argument("--width_embedding_dim", default=128, type=int)
         self.add_argument("--optimizer", default="adamw", type=str)
+        # self.add_argument("--scheduler", default="linear", type=str)
         # self.add_argument("--context_window", default=0, type=int)
         self.add_argument("--augment_context_aware_p", default=None, type=float)
         self.add_argument("--augment_entity_replace_p", default=None, type=float)
@@ -931,6 +932,12 @@ def train(args, model, processor, tokenizer):
         optimizer = Lamb(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
                                                 num_training_steps=t_total)
+    # if args.scheduler == "linear":
+    #     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
+    #                                                 num_training_steps=t_total)
+    # elif args.scheduler == "cosine":
+    #     scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
+    #                                                 num_training_steps=t_total, num_cycles=1)
     # Check if saved optimizer or scheduler states exist
     if os.path.isfile(os.path.join(args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
             os.path.join(args.model_name_or_path, "scheduler.pt")):

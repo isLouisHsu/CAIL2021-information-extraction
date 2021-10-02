@@ -60,7 +60,13 @@ def main():
     # n_splits = 5
     # seed=42
     # --------------------------
-    version = "nezha-legal-fgm1.0-lsr0.1-ema3"
+    # version = "nezha-legal-fgm1.0-lsr0.1-ema3"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    version = "nezha-legal-100k-fgm1.0-lsr0.1"
     model_type = "nezha_span"
     dataset_name = "cail_ner"
     n_splits = 5
