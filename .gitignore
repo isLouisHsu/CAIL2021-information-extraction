@@ -10,4 +10,3 @@ wandb/*
 .vscode/
 .ipynb_checkpoints/
 !.gitkeep
-！checksum
