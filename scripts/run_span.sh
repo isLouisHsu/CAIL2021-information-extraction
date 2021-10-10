@@ -565,6 +565,62 @@ python run_span.py \
     --seed=42
 done
 
+# Further-pretrain LSR
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-legal-fgm2.0-lsr0.1-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Code/CAIL2021/nezha-legal-cn-base-wwm/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=8.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=2.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --seed=42
+done
+# main_local
+# avg
+# {'p': 0.9046767380798356, 'r': 0.8917144893289825, 'f': 0.8981488477521723}
+# 犯罪嫌疑人
+# {'p': 0.963254593175853, 'r': 0.9653411728299551, 'f': 0.9642967542503864}
+# 受害人
+# {'p': 0.9311955168119551, 'r': 0.9623552123552124, 'f': 0.9465189873417722}
+# 被盗货币
+# {'p': 0.8584686774941995, 'r': 0.8087431693989071, 'f': 0.8328643781654473}
+# 物品价值
+# {'p': 0.9754571703561117, 'r': 0.9698564593301435, 'f': 0.9726487523992322}
+# 盗窃获利
+# {'p': 0.8848484848484849, 'r': 0.9106029106029107, 'f': 0.8975409836065574}
+# 被盗物品
+# {'p': 0.8189794091316025, 'r': 0.7912125929769936, 'f': 0.8048565898293155}
+# 作案工具
+# {'p': 0.7943166441136671, 'r': 0.7986394557823129, 'f': 0.796472184531886}
+# 时间
+# {'p': 0.9484612532443456, 'r': 0.9251356238698011, 'f': 0.9366532405712193}
+# 地点
+# {'p': 0.874439461883408, 'r': 0.8316747227750924, 'f': 0.8525211308656367}
+# 组织机构
+# {'p': 0.8808618504435995, 'r': 0.8622828784119106, 'f': 0.8714733542319749}
+
 # Further-pretrain 100k steps, LSR
 for k in 0 1 2 3 4
 do
