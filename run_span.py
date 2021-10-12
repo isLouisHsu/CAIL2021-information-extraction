@@ -175,19 +175,23 @@ class SpanV2(nn.Module):
         spans,      # (batch_size, num_spans, 3)
         span_mask,  # (batch_size, num_spans)
         is_logits:  bool=True,
+        thresh:     float=0.,
     ):
         decodeds = []
         if is_logits:
-            labels = batch.argmax(dim=-1)
+            # labels = batch.argmax(dim=-1)
+            probas, labels = batch.softmax(dim=-1).max(dim=-1)
         else:
-            labels = batch
-        for labels_, spans_, span_mask_ in zip(labels, spans, span_mask):
+            probas, labels = torch.ones_like(batch), batch
+        for labels_, probas_, spans_, span_mask_ in zip(labels, probas, spans, span_mask):
             span_mask_ = span_mask_ == 1.
             labels_ = labels_[span_mask_].cpu().numpy().tolist()
+            probas_ = probas_[span_mask_].cpu().numpy().tolist()
             spans_ = spans_[span_mask_].cpu().numpy().tolist()
 
             decoded_ = []
-            for t, s in zip(labels_, spans_):
+            for t, p, s in zip(labels_, probas_, spans_):
+                if p < thresh: continue     # 置信度过低，舍去
                 decoded_.append([t, s[0] - 1, s[1] - 1])
             decodeds.append(decoded_)
         
@@ -466,6 +470,7 @@ class NerArgumentParser(ArgumentParser):
         
         self.add_argument("--max_span_length", default=50, type=int)
         self.add_argument("--width_embedding_dim", default=128, type=int)
+        self.add_argument("--span_proba_thresh", default=0., type=float)
         self.add_argument("--optimizer", default="adamw", type=str)
         # self.add_argument("--scheduler", default="linear", type=str)
         # self.add_argument("--context_window", default=0, type=int)
@@ -1204,7 +1209,7 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
     results['loss'] = eval_loss / nb_eval_steps
     return results
     
-def predict_decode_batch(example, batch, id2label, post_process=True):
+def predict_decode_batch(example, batch, id2label, thresh=0., post_process=True):
     # if example["id"].split("-")[-1] == "033522d9bdf796d13c4b594cbdf03184":
     #     print()
     is_intersect = lambda a, b: min(a[1], b[1]) - max(a[0], b[0]) > 0
@@ -1245,7 +1250,7 @@ def predict_decode_batch(example, batch, id2label, post_process=True):
 
     text = "".join(example["tokens"])
     logits = batch["logits"]
-    preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"])
+    preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"], thresh=thresh)
     pred, input_len = preds[0], batch["input_len"][0]
     start, end = batch["sent_start"].item(), batch["sent_end"].item()
     pred = [(id2label[t], b, e) for t, b, e in pred if id2label[t] != "O"]
@@ -1400,7 +1405,7 @@ def predict(args, model, processor, tokenizer, prefix=""):
             batch.pop("token_type_ids")
         # 解码输出
         example = test_dataset.examples[step][1]
-        results.append(predict_decode_batch(example, batch, id2label, post_process=True))
+        results.append(predict_decode_batch(example, batch, id2label, args.span_proba_thresh, post_process=True))
         # for k-fold
         batch_all.append({k: v.detach().cpu() for k, v in batch.items()})
     logger.info("\n")

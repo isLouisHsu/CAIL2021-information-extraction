@@ -18,6 +18,8 @@ def main():
     local_debug = run_args.local_debug
 
     # WARNING：以下配置需要在提交前指定！！！
+    # span_proba_thresh = 0.0
+    span_proba_thresh = 0.3
     # version = "baseline"
     # model_type = "bert_span"
     # dataset_name = "cail_ner"
@@ -72,11 +74,25 @@ def main():
     # n_splits = 5
     # seed=42
     # --------------------------
-    version = "nezha-legal-fgm2.0-lsr0.1"
+    # version = "nezha-legal-fgm2.0-lsr0.1"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    version = "nezha-legal-fgm1.0-lsr0.1-v2"
     model_type = "nezha_span"
     dataset_name = "cail_ner"
     n_splits = 5
     seed=42
+    # seed=32
+    # seed=12345
+    # --------------------------
+    # version = "nezha-legal-fgm1.0-lsr0.1-v2-pseudo_t0.9"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
 
     test_examples = []
     test_batches = []
@@ -100,9 +116,9 @@ def main():
         else:
             args.test_file = f"dev.{k}.json"
         parser.save_args_to_json(f"./args/pred.{k}.json", args)
+
         # 确保目录下预测输出文件被清除
         os.system(f"rm -rf {os.path.join(model_path, 'test_*')}")
-
         if local_debug:
             # 线下预测测试
             os.system(f"python run_span.py ./args/pred.{k}.json")
@@ -119,7 +135,8 @@ def main():
     # 结果预测
     results = []
     for i, (example, batch) in enumerate(zip(test_examples, test_batches)):
-        results.append(predict_decode_batch(example[1], batch, CailNerProcessor().id2label))
+        results.append(predict_decode_batch(example[1], batch, CailNerProcessor().id2label, 
+            thresh=span_proba_thresh, post_process=True))
     # 保存结果
     output_predict_file = "output_local.json" if local_debug else outfile
     with open(output_predict_file, "w") as writer:
