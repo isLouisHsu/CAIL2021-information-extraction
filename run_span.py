@@ -382,8 +382,6 @@ class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
 
 class ExponentialMovingAverage(object):
     '''
-    权重滑动平均，对最近的数据给予更高的权重
-    uasge：
     # 初始化
     ema = EMA(model, 0.999)
     # 训练过程中，更新完参数后，同步update shadow weights
@@ -1071,7 +1069,8 @@ def train(args, model, processor, tokenizer):
                             if eval_results["avg"]["f"] > best_f1:
                                 best_f1 = eval_results["avg"]["f"]
                                 # Save model checkpoint
-                                output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(999999))
+                                output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(
+                                    global_step if not args.save_best_checkpoints else 999999))
                                 if not os.path.exists(output_dir):
                                     os.makedirs(output_dir)
                                 model_to_save = (
@@ -1102,7 +1101,7 @@ def train(args, model, processor, tokenizer):
                                     logger.info("Saving model checkpoint to %s", output_dir)
                                 ema.restore(model)
                                 
-                elif args.local_rank in [-1, 0] and \
+                elif args.local_rank in [-1, 0] and not args.evaluate_during_training and \
                         args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
                     output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(
