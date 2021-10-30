@@ -814,13 +814,13 @@ def train(args, model, processor, tokenizer):
         args.logging_steps = args.save_steps = int(t_total // args.num_train_epochs)
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
-    bert_param_optimizer = list(model.bert.named_parameters())
-    bert_param_optimizer_ids = [id(p) for n, p in bert_param_optimizer]
-    other_param_optimizer = [(n, p) for n, p in model.named_parameters() if id(p) not in bert_param_optimizer_ids]
+    base_model_param_optimizer = list(model.base_model.named_parameters())
+    base_model_param_optimizer_ids = [id(p) for n, p in base_model_param_optimizer]
+    other_param_optimizer = [(n, p) for n, p in model.named_parameters() if id(p) not in base_model_param_optimizer_ids]
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in bert_param_optimizer if not any(nd in n for nd in no_decay)],
+        {'params': [p for n, p in base_model_param_optimizer if not any(nd in n for nd in no_decay)],
          'weight_decay': args.weight_decay, 'lr': args.learning_rate},
-        {'params': [p for n, p in bert_param_optimizer if any(nd in n for nd in no_decay)], 
+        {'params': [p for n, p in base_model_param_optimizer if any(nd in n for nd in no_decay)], 
          'weight_decay': 0.0, 'lr': args.learning_rate},
         {'params': [p for n, p in other_param_optimizer], 
          'weight_decay': args.weight_decay, 'lr': args.other_learning_rate}
