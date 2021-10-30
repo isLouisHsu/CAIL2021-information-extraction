@@ -92,6 +92,10 @@ if __name__ == '__main__':
     # # save samples
     # utils.save_samples(os.path.join(args.output_dir, "train.json"), train_samples)
     # utils.save_samples(os.path.join(args.output_dir, "dev.json"), dev_samples)
+    if args.n_splits < 2:
+        utils.save_samples(os.path.join(args.output_dir, f"train.json"), raw_samples)
+        logging.info(f"Number of training data: {len(raw_samples)}")
+        exit(0)
 
     # k-fold
     dev_samples_all = []; dev_groundtruths_all = []

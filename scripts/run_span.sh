@@ -363,7 +363,7 @@ done
 # 组织机构
 # {'p': 0.8795336787564767, 'r': 0.8424317617866005, 'f': 0.8605830164765527}
 
-# TODO: context-aware，仅增强分类性能较差的“受害人、犯罪嫌疑人”
+# context-aware，仅增强分类性能较差的“受害人、犯罪嫌疑人”
 for k in 0 1 2 3 4
 do
 python run_span.py \
@@ -419,26 +419,340 @@ done
 # 组织机构
 # {'p': 0.8423586040914561, 'r': 0.8684863523573201, 'f': 0.855222968845449}
 
-# TODO: albert
-# TODO: distill
-# TODO: further pretrain，加入别的赛道数据
-# TODO: 伪标签，别的赛道数据作为无标签数据
-# TODO: 往年数据
+# LSR
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-fgm1.0-lsr0.1-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=8.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --seed=42
+done
+# main_local
+# avg
+# {'p': 0.8992657967816792, 'r': 0.8866509133190803, 'f': 0.8929138022210471}
+# 犯罪嫌疑人
+# {'p': 0.9609907120743034, 'r': 0.9605446387126721, 'f': 0.9607676236168073}
+# 受害人
+# {'p': 0.9242566510172144, 'r': 0.9501287001287001, 'f': 0.9370141202601936}
+# 被盗货币
+# {'p': 0.8159574468085107, 'r': 0.8382513661202186, 'f': 0.8269541778975741}
+# 物品价值
+# {'p': 0.9697696737044146, 'r': 0.9669856459330144, 'f': 0.9683756588404409}
+# 盗窃获利
+# {'p': 0.8627450980392157, 'r': 0.9147609147609148, 'f': 0.8879919273461151}
+# 被盗物品
+# {'p': 0.8217407137654771, 'r': 0.7806607853312576, 'f': 0.8006741772376476}
+# 作案工具
+# {'p': 0.801994301994302, 'r': 0.7659863945578231, 'f': 0.7835768963117605}
+# 时间
+# {'p': 0.9488699518340126, 'r': 0.9262206148282097, 'f': 0.9374084919472914}
+# 地点
+# {'p': 0.861102919492775, 'r': 0.8302530565823145, 'f': 0.8453966415749856}
+# 组织机构
+# {'p': 0.8513513513513513, 'r': 0.8598014888337469, 'f': 0.8555555555555555}
 
-# <<< 第二阶段 <<<
+# Further-pretrain LSR
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-legal-fgm1.0-lsr0.1-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Code/CAIL2021/nezha-legal-cn-base-wwm/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=8.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --seed=42
+done
+# main_local
+# avg
+# {'p': 0.9032722314800787, 'r': 0.8945650950827051, 'f': 0.898897578441534}
+# 犯罪嫌疑人
+# {'p': 0.9654852190063458, 'r': 0.965186445922946, 'f': 0.9653358093469513}
+# 受害人
+# {'p': 0.9271829682196853, 'r': 0.9668597168597168, 'f': 0.9466057646873522}
+# 被盗货币
+# {'p': 0.8280590717299579, 'r': 0.8579234972677595, 'f': 0.8427267847557702}
+# 物品价值
+# {'p': 0.9745069745069745, 'r': 0.969377990430622, 'f': 0.9719357159990405}
+# 盗窃获利
+# {'p': 0.8812877263581489, 'r': 0.9106029106029107, 'f': 0.8957055214723928}
+# 被盗物品
+# {'p': 0.8194369732831271, 'r': 0.7905206711641585, 'f': 0.8047191406937841}
+# 作案工具
+# {'p': 0.7972972972972973, 'r': 0.8027210884353742, 'f': 0.7999999999999999}
+# 时间
+# {'p': 0.950575994054255, 'r': 0.9251356238698011, 'f': 0.937683284457478}
+# 地点
+# {'p': 0.8714835652946402, 'r': 0.836792721069093, 'f': 0.8537859007832898}
+# 组织机构
+# {'p': 0.8789407313997478, 'r': 0.8647642679900744, 'f': 0.8717948717948718}
 
-# ==================================================================================================================
-# TODO: label smooth 0.1
-# for k in 0 1 2 3 4
-# do
+# Further-pretrain LSR, EMA(start from epoch 4)
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-legal-fgm1.0-lsr0.1-ema3-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Code/CAIL2021/nezha-legal-cn-base-wwm/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=8.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --do_ema --ema_start_epoch=3 \
+    --seed=42
+done
+
+# Further-pretrain LSR
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-legal-fgm2.0-lsr0.1-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Code/CAIL2021/nezha-legal-cn-base-wwm/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=8.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=2.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --seed=42
+done
+# main_local
+# avg
+# {'p': 0.9046767380798356, 'r': 0.8917144893289825, 'f': 0.8981488477521723}
+# 犯罪嫌疑人
+# {'p': 0.963254593175853, 'r': 0.9653411728299551, 'f': 0.9642967542503864}
+# 受害人
+# {'p': 0.9311955168119551, 'r': 0.9623552123552124, 'f': 0.9465189873417722}
+# 被盗货币
+# {'p': 0.8584686774941995, 'r': 0.8087431693989071, 'f': 0.8328643781654473}
+# 物品价值
+# {'p': 0.9754571703561117, 'r': 0.9698564593301435, 'f': 0.9726487523992322}
+# 盗窃获利
+# {'p': 0.8848484848484849, 'r': 0.9106029106029107, 'f': 0.8975409836065574}
+# 被盗物品
+# {'p': 0.8189794091316025, 'r': 0.7912125929769936, 'f': 0.8048565898293155}
+# 作案工具
+# {'p': 0.7943166441136671, 'r': 0.7986394557823129, 'f': 0.796472184531886}
+# 时间
+# {'p': 0.9484612532443456, 'r': 0.9251356238698011, 'f': 0.9366532405712193}
+# 地点
+# {'p': 0.874439461883408, 'r': 0.8316747227750924, 'f': 0.8525211308656367}
+# 组织机构
+# {'p': 0.8808618504435995, 'r': 0.8622828784119106, 'f': 0.8714733542319749}
+
+# Further-pretrain 100k steps, LSR
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-legal-100k-fgm1.0-lsr0.1-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Code/CAIL2021/nezha-legal-cn-base-wwm-100k/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=8.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --seed=42
+done
+
+# pseudo label
+python prepare_pseudo.py \
+    --output_dir=../cail_processed_data/ \
+    --min_length=30 \
+    --max_len=256 \
+    --raw_files \
+        ../cail_raw_data/2018/CAIL2018_ALL_DATA/final_all_data/restData/rest_data.json \
+    --seed=42
+python prepare_data.py \
+    --data_files ../cail_processed_data/pseudo-minlen30-maxlen256-seed42/xxcq_pseudo.json \
+    --context_window 0 \
+    --n_splits 1 \
+    --output_dir data/ \
+    --seed 42
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-legal-fgm1.0-lsr0.1-pseudo_t0.9-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=../CAIL2021/ner-cail_ner-nezha_span-nezha-legal-fgm1.0-lsr0.1-fold${k}-42/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=1e-5 \
+    --other_learning_rate=1e-5 \
+    --num_train_epochs=1.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --do_pseudo \
+    --pseudo_data_dir=../cail_processed_data/ner-ctx0-1fold-seed42/ \
+    --pseudo_data_file=train.json \
+    --pseudo_num_sample=1500 \
+    --pseudo_proba_thresh=0.9 \
+    --seed=42
+done
+
+# TODO: 全部数据
+
+# TODO: EMA
+for k in 0 1 2 3 4
+do
+python run_span.py \
+    --version=nezha-fgm1.0-ema0.999-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=5e-5 \
+    --other_learning_rate=1e-3 \
+    --num_train_epochs=4.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --do_ema \
+    --seed=42
+done
+
+# Further-pretrain LSR，由于eval与test解码当时不一致，重新训练，并加入阈值，多组种子
+for seed in 42 12345 32
+do
+for k in 0 1 2 3 4
+do
 # python run_span.py \
-#     --version=nezha-rdrop0.1-fgm1.0-lsr0.1-fold${k} \
+#     --version=nezha-legal-fgm1.0-lsr0.1-v2-fold${k} \
 #     --data_dir=./data/ner-ctx0-5fold-seed42/ \
 #     --train_file=train.${k}.json \
 #     --dev_file=dev.${k}.json \
 #     --test_file=dev.${k}.json \
 #     --model_type=nezha_span \
-#     --model_name_or_path=/home/louishsu/NewDisk/Garage/weights/transformers/nezha-cn-base/ \
+#     --model_name_or_path=/home/louishsu/NewDisk/Code/CAIL2021/nezha-legal-cn-base-wwm/ \
 #     --do_train \
 #     --overwrite_output_dir \
 #     --evaluate_during_training \
@@ -454,13 +768,207 @@ done
 #     --gradient_accumulation_steps=2 \
 #     --learning_rate=5e-5 \
 #     --other_learning_rate=1e-3 \
-#     --num_train_epochs=4.0 \
+#     --num_train_epochs=8.0 \
 #     --warmup_proportion=0.1 \
-#     --rdrop_alpha=0.1 \
 #     --do_fgm --fgm_epsilon=1.0 \
 #     --loss_type=lsr --label_smooth_eps=0.1 \
-#     --seed=42
-# done
+#     --span_proba_thresh=0.0 \
+#     --seed=${seed}
+python run_span.py \
+    --version=nezha-legal-fgm1.0-lsr0.1-v2-pseudo_t0.9-fold${k} \
+    --data_dir=./data/ner-ctx0-5fold-seed42/ \
+    --train_file=train.${k}.json \
+    --dev_file=dev.${k}.json \
+    --test_file=dev.${k}.json \
+    --model_type=nezha_span \
+    --model_name_or_path=output/ner-cail_ner-nezha_span-nezha-legal-fgm1.0-lsr0.1-v2-fold${k}-42/ \
+    --do_train \
+    --overwrite_output_dir \
+    --evaluate_during_training \
+    --evaluate_each_epoch \
+    --save_best_checkpoints \
+    --max_span_length=40 \
+    --width_embedding_dim=128 \
+    --train_max_seq_length=512 \
+    --eval_max_seq_length=512 \
+    --do_lower_case \
+    --per_gpu_train_batch_size=8 \
+    --per_gpu_eval_batch_size=16 \
+    --gradient_accumulation_steps=2 \
+    --learning_rate=1e-5 \
+    --other_learning_rate=1e-5 \
+    --num_train_epochs=1.0 \
+    --warmup_proportion=0.1 \
+    --do_fgm --fgm_epsilon=1.0 \
+    --loss_type=lsr --label_smooth_eps=0.1 \
+    --do_pseudo \
+    --pseudo_data_dir=../cail_processed_data/ner-ctx0-1fold-seed42/ \
+    --pseudo_data_file=train.json \
+    --pseudo_num_sample=1500 \
+    --pseudo_proba_thresh=0.9 \
+    --span_proba_thresh=0.0 \
+    --seed=${seed}
+done
+done
+
+# ner-cail_ner-nezha_span-nezha-legal-fgm1.0-lsr0.1-v2-42
+# span_proba_thresh = 0.0
+# avg
+# {'p': 0.9044000303974467, 'r': 0.8927647125014065, 'f': 0.8985447063930991}
+# 犯罪嫌疑人
+# {'p': 0.9654852190063458, 'r': 0.965186445922946, 'f': 0.9653358093469513}
+# 受害人
+# {'p': 0.9271829682196853, 'r': 0.9668597168597168, 'f': 0.9466057646873522}
+# 被盗货币
+# {'p': 0.8549883990719258, 'r': 0.805464480874317, 'f': 0.8294879009566686}
+# 物品价值
+# {'p': 0.9745069745069745, 'r': 0.969377990430622, 'f': 0.9719357159990405}
+# 盗窃获利
+# {'p': 0.8812877263581489, 'r': 0.9106029106029107, 'f': 0.8957055214723928}
+# 被盗物品
+# {'p': 0.8194369732831271, 'r': 0.7905206711641585, 'f': 0.8047191406937841}
+# 作案工具
+# {'p': 0.7972972972972973, 'r': 0.8027210884353742, 'f': 0.7999999999999999}
+# 时间
+# {'p': 0.950575994054255, 'r': 0.9251356238698011, 'f': 0.937683284457478}
+# 地点
+# {'p': 0.8714835652946402, 'r': 0.836792721069093, 'f': 0.8537859007832898}
+# 组织机构
+# {'p': 0.8789407313997478, 'r': 0.8647642679900744, 'f': 0.8717948717948718}
+
+# span_proba_thresh = 0.7
+# avg
+# {'p': 0.9380872483221476, 'r': 0.8388282510033382, 'f': 0.8856854319716441}
+# 犯罪嫌疑人
+# {'p': 0.9784757653061225, 'r': 0.949559028315024, 'f': 0.963800549666274}
+# 受害人
+# {'p': 0.9481084700368263, 'r': 0.9111969111969112, 'f': 0.9292863002461034}
+# 被盗货币
+# {'p': 0.9082191780821918, 'r': 0.7245901639344262, 'f': 0.8060790273556231}
+# 物品价值
+# {'p': 0.9813176007866273, 'r': 0.9550239234449761, 'f': 0.967992240543162}
+# 盗窃获利
+# {'p': 0.9420289855072463, 'r': 0.8108108108108109, 'f': 0.8715083798882682}
+# 被盗物品
+# {'p': 0.8757844622376109, 'r': 0.7000518941359626, 'f': 0.7781195923860794}
+# 作案工具
+# {'p': 0.8610108303249098, 'r': 0.6489795918367347, 'f': 0.7401086113266098}
+# 时间
+# {'p': 0.9568537609774723, 'r': 0.9063291139240506, 'f': 0.9309063893016345}
+# 地点
+# {'p': 0.9221226740179187, 'r': 0.7608757463747512, 'f': 0.8337747312665523}
+# 组织机构
+# {'p': 0.9052333804809052, 'r': 0.794044665012407, 'f': 0.8460013218770653}
+
+# span_proba_thresh = 0.3
+# avg
+# {'p': 0.9045682578291274, 'r': 0.8927272045309629, 'f': 0.89860872519963}
+# 犯罪嫌疑人
+# {'p': 0.9656346749226006, 'r': 0.965186445922946, 'f': 0.9654105083958833}
+# 受害人
+# {'p': 0.9277554800864465, 'r': 0.9668597168597168, 'f': 0.9469040491570822}
+# 被盗货币
+# {'p': 0.8548199767711963, 'r': 0.8043715846994536, 'f': 0.8288288288288288}
+# 物品价值
+# {'p': 0.9745069745069745, 'r': 0.969377990430622, 'f': 0.9719357159990405}
+# 盗窃获利
+# {'p': 0.8848484848484849, 'r': 0.9106029106029107, 'f': 0.8975409836065574}
+# 被盗物品
+# {'p': 0.8194369732831271, 'r': 0.7905206711641585, 'f': 0.8047191406937841}
+# 作案工具
+# {'p': 0.7972972972972973, 'r': 0.8027210884353742, 'f': 0.7999999999999999}
+# 时间
+# {'p': 0.950575994054255, 'r': 0.9251356238698011, 'f': 0.937683284457478}
+# 地点
+# {'p': 0.8714835652946402, 'r': 0.836792721069093, 'f': 0.8537859007832898}
+# 组织机构
+# {'p': 0.8789407313997478, 'r': 0.8647642679900744, 'f': 0.8717948717948718}
+
+# ner-cail_ner-nezha_span-nezha-legal-fgm1.0-lsr0.1-v2-32
+# span_proba_thresh = 0.3
+# avg
+# {'p': 0.9045304966710033, 'r': 0.8866509133190803, 'f': 0.89550146794204}
+# 犯罪嫌疑人
+# {'p': 0.9707766838568527, 'r': 0.9611635463407087, 'f': 0.9659461981029388}
+# 受害人
+# {'p': 0.923739237392374, 'r': 0.9665379665379665, 'f': 0.9446540880503146}
+# 被盗货币
+# {'p': 0.8549883990719258, 'r': 0.805464480874317, 'f': 0.8294879009566686}
+# 物品价值
+# {'p': 0.9671584959543075, 'r': 0.9722488038277513, 'f': 0.9696969696969697}
+# 盗窃获利
+# {'p': 0.875, 'r': 0.9168399168399168, 'f': 0.8954314720812182}
+# 被盗物品
+# {'p': 0.8185615691972393, 'r': 0.7796229026120048, 'f': 0.7986178789758129}
+# 作案工具
+# {'p': 0.7818930041152263, 'r': 0.7755102040816326, 'f': 0.7786885245901639}
+# 时间
+# {'p': 0.9487369985141159, 'r': 0.9236889692585896, 'f': 0.9360454462158696}
+# 地点
+# {'p': 0.8810975609756098, 'r': 0.8217230594256468, 'f': 0.8503751655141975}
+# 组织机构
+# {'p': 0.8553770086526576, 'r': 0.858560794044665, 'f': 0.8569659442724459}
+
+# ner-cail_ner-nezha_span-nezha-legal-fgm1.0-lsr0.1-v2-12345
+# span_proba_thresh = 0.3
+# avg
+# {'p': 0.905612049850906, 'r': 0.8885263118412663, 'f': 0.8969878263503663}
+# 犯罪嫌疑人
+# {'p': 0.9662277304415182, 'r': 0.9650317190159369, 'f': 0.9656293543892244}
+# 受害人
+# {'p': 0.9263841633158058, 'r': 0.9636422136422137, 'f': 0.944645954896704}
+# 被盗货币
+# {'p': 0.83675799086758, 'r': 0.8010928961748633, 'f': 0.818537130094919}
+# 物品价值
+# {'p': 0.9745559289486317, 'r': 0.9712918660287081, 'f': 0.9729211598370476}
+# 盗窃获利
+# {'p': 0.8822355289421158, 'r': 0.918918918918919, 'f': 0.90020366598778}
+# 被盗物品
+# {'p': 0.8217335998546248, 'r': 0.7822176094101366, 'f': 0.8014888337468983}
+# 作案工具
+# {'p': 0.8005540166204986, 'r': 0.7863945578231293, 'f': 0.7934111187371312}
+# 时间
+# {'p': 0.950185873605948, 'r': 0.9244122965641953, 'f': 0.937121906507791}
+# 地点
+# {'p': 0.8792738275340394, 'r': 0.8262723912425363, 'f': 0.8519495749047201}
+# 组织机构
+# {'p': 0.8734177215189873, 'r': 0.8560794044665012, 'f': 0.8646616541353384}
+
+# ner-cail_ner-nezha_span-nezha-legal-fgm1.0-lsr0.1-v2-pseudo_t0.9
+# span_proba_thresh = 0.0
+# avg
+# {'p': 0.90237046041635, 'r': 0.890964329920108, 'f': 0.8966311220156647}
+# 犯罪嫌疑人
+# {'p': 0.9675112700139904, 'r': 0.9630202692248182, 'f': 0.9652605459057073}
+# 受害人
+# {'p': 0.9221575237511492, 'r': 0.9681467181467182, 'f': 0.9445926856066551}
+# 被盗货币
+# {'p': 0.8427745664739884, 'r': 0.7967213114754098, 'f': 0.8191011235955056}
+# 物品价值
+# {'p': 0.9758919961427194, 'r': 0.968421052631579, 'f': 0.9721421709894332}
+# 盗窃获利
+# {'p': 0.8772277227722772, 'r': 0.920997920997921, 'f': 0.8985801217038539}
+# 被盗物品
+# {'p': 0.8138829407566024, 'r': 0.7889638470852793, 'f': 0.8012296881862099}
+# 作案工具
+# {'p': 0.8055172413793104, 'r': 0.7945578231292517, 'f': 0.8}
+# 时间
+# {'p': 0.950965824665676, 'r': 0.9258589511754068, 'f': 0.9382444566611691}
+# 地点
+# {'p': 0.8697204045211184, 'r': 0.8313903895365368, 'f': 0.8501235644715802}
+# 组织机构
+
+
+# TODO: albert
+# TODO: distill
+# TODO: further pretrain，加入别的赛道数据
+# TODO: 伪标签，别的赛道数据作为无标签数据
+# TODO: 往年数据
+# TODO: TTA
+
+# <<< 第二阶段 <<<
+
+# ==================================================================================================================
 
 # for k in 0 1 2 3 4
 # do

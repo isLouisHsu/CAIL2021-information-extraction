@@ -18,6 +18,8 @@ def main():
     local_debug = run_args.local_debug
 
     # WARNING：以下配置需要在提交前指定！！！
+    # span_proba_thresh = 0.0
+    span_proba_thresh = 0.3
     # version = "baseline"
     # model_type = "bert_span"
     # dataset_name = "cail_ner"
@@ -36,16 +38,69 @@ def main():
     # n_splits = 5
     # seed=42
     # --------------------------
-    version = "nezha-fgm1.0"
+    # version = "nezha-fgm1.0"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    # version = "nezha-rdrop0.1-fgm1.0-aug_ctx0.15"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    # version = "nezha-fgm1.0-lsr0.1"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    # version = "nezha-legal-fgm1.0-lsr0.1"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    # version = "nezha-legal-fgm1.0-lsr0.1-ema3"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    # version = "nezha-legal-100k-fgm1.0-lsr0.1"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # --------------------------
+    # version = "nezha-legal-fgm2.0-lsr0.1"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
+    # # --------------------------
+    version = "nezha-legal-fgm1.0-lsr0.1-v2"
     model_type = "nezha_span"
     dataset_name = "cail_ner"
     n_splits = 5
     seed=42
+    # seed=32
+    # seed=12345
+    # --------------------------
+    # version = "nezha-legal-fgm1.0-lsr0.1-v2-pseudo_t0.9"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
 
     test_examples = None
     test_batches = None
-    for k in range(n_splits):
-        model_path = f"./output/ner-{dataset_name}-{model_type}-{version}-fold{k}-{seed}/"
+    # for k in range(n_splits):
+    #     model_path = f"./output/ner-{dataset_name}-{model_type}-{version}-fold{k}-{seed}/"
+    model_paths = [f"./output/ner-{dataset_name}-{model_type}-{version}-fold{k}-{seed}/" for k in range(n_splits)]
+    for k in range(len(model_paths)):
+        model_path = model_paths[k]
         # 生成测试运行参数
         json_file = os.path.join(model_path, "training_args.json")
         parser = NerArgumentParser()
@@ -61,9 +116,9 @@ def main():
         else:
             args.test_file = run_args.test_file
         parser.save_args_to_json(f"./args/pred.{k}.json", args)
+
         # 确保目录下预测输出文件被清除
         os.system(f"rm -rf {os.path.join(model_path, 'test_*')}")
-
         if local_debug:
             # 线下预测测试
             os.system(f"python run_span.py ./args/pred.{k}.json")
@@ -83,7 +138,8 @@ def main():
     # 集成结果预测
     results = []
     for i, (example, batch) in enumerate(zip(test_examples, test_batches)):
-        results.append(predict_decode_batch(example[1], batch, CailNerProcessor().id2label))
+        results.append(predict_decode_batch(example[1], batch, CailNerProcessor().id2label, 
+            thresh=span_proba_thresh, post_process=True))
     # 保存结果
     output_predict_file = "output.json" if local_debug else outfile
     with open(output_predict_file, "w") as writer:

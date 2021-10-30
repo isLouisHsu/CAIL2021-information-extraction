@@ -10,17 +10,16 @@ import itertools
 from pathlib import Path
 from argparse import ArgumentParser, Namespace
 from tqdm import tqdm
-
+import copy
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler,DistributedSampler
 import numpy as np
-
 # datasets
 from transformers.data import DataProcessor
-
+from torch.cuda.amp import autocast as ac
 # models
 import transformers
 from transformers import WEIGHTS_NAME
@@ -31,11 +30,11 @@ from transformers import (
     BertModel,
 )
 from transformers.modeling_outputs import TokenClassifierOutput
-from nezha.modeling_nezha import NeZhaModel, NeZhaPreTrainedModel
+from nezha.modeling_nezha import NeZhaModel, NeZhaPreTrainedModel,NeZhaConfig
 from nezha.modeling_nezha import relative_position_encoding
-
+# from roformer import RoFormerModel,RoFormerConfig,RoFormerPreTrainedModel
 # trainer & training arguments
-from transformers import AdamW, get_linear_schedule_with_warmup, get_cosine_with_hard_restarts_schedule_with_warmup
+from transformers import AdamW, get_linear_schedule_with_warmup
 from lamb import Lamb
 
 # metrics
@@ -49,8 +48,6 @@ from seqeval.metrics.sequence_labeling import (
 from evaluate import score
 from utils import LABEL_MEANING_MAP, MEANING_LABEL_MAP, get_ner_tags
 
-PSEUDO_TAG = -1
-
 class BertConfigSpanV2(BertConfig):
 
     def __init__(self, 
@@ -62,7 +59,28 @@ class BertConfigSpanV2(BertConfig):
         self.max_span_length = max_span_length
         self.width_embedding_dim = width_embedding_dim
 
-# from allennlp.nn.util import batched_index_select
+class NeZhaConfigSpanV2(NeZhaConfig):
+
+    def __init__(self,
+        max_span_length=10,
+        width_embedding_dim=150,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.max_span_length = max_span_length
+        self.width_embedding_dim = width_embedding_dim
+
+# class RoformerConfigSpanV2(RoFormerConfig):
+#
+#     def __init__(self,
+#         max_span_length=10,
+#         width_embedding_dim=150,
+#         **kwargs,
+#     ):
+#         super().__init__(**kwargs)
+#         self.max_span_length = max_span_length
+#         self.width_embedding_dim = width_embedding_dim
+
 def batched_index_select(input, index):
     batch_size, sequence_length, hidden_size = input.size()
     batch_size, num_spans = index.size()
@@ -73,16 +91,12 @@ def batched_index_select(input, index):
     output = torch.bmm(index_onehot, input)
     return output
 
-
 class LabelSmoothingCE(nn.Module):
-    
     def __init__(self, eps=0.1, reduction='mean', ignore_index=-100):
         super().__init__()
-
         self.eps = eps
         self.reduction = reduction
         self.ignore_index = ignore_index
-
     def forward(self, input, target):
         c = input.size()[-1]
         log_preds = F.log_softmax(input, dim=-1)
@@ -95,7 +109,6 @@ class LabelSmoothingCE(nn.Module):
         loss_1 = loss * self.eps / c
         loss_2 = F.nll_loss(log_preds, target, reduction=self.reduction, ignore_index=self.ignore_index)
         return loss_1 + (1 - self.eps) * loss_2
-
 
 class FocalLoss(nn.Module):
     """
@@ -111,7 +124,6 @@ class FocalLoss(nn.Module):
         self.epsilon = epsilon
         self.activation_type = activation_type
         self.reduction = reduction
-
     def forward(self, input, target):
         """
         Args:
@@ -168,37 +180,31 @@ class SpanV2(nn.Module):
 
         logits = self.classifier(spans_embedding)
         return logits
-    
+
     @staticmethod
     def decode_batch(
         batch,      # (batch_size, num_spans, num_labels)
         spans,      # (batch_size, num_spans, 3)
         span_mask,  # (batch_size, num_spans)
         is_logits:  bool=True,
-        thresh:     float=0.,
     ):
         decodeds = []
         if is_logits:
-            # labels = batch.argmax(dim=-1)
-            probas, labels = batch.softmax(dim=-1).max(dim=-1)
+            labels = batch.argmax(dim=-1)
         else:
-            probas, labels = torch.ones_like(batch), batch
-        for labels_, probas_, spans_, span_mask_ in zip(labels, probas, spans, span_mask):
+            labels = batch
+        for labels_, spans_, span_mask_ in zip(labels, spans, span_mask):
             span_mask_ = span_mask_ == 1.
             labels_ = labels_[span_mask_].cpu().numpy().tolist()
-            probas_ = probas_[span_mask_].cpu().numpy().tolist()
             spans_ = spans_[span_mask_].cpu().numpy().tolist()
-
             decoded_ = []
-            for t, p, s in zip(labels_, probas_, spans_):
-                if p < thresh: continue     # 置信度过低，舍去
+            for t, s in zip(labels_, spans_):
                 decoded_.append([t, s[0] - 1, s[1] - 1])
             decodeds.append(decoded_)
-        
+
         return decodeds
 
 class SpanV2Loss(nn.Module):
-
     def __init__(self):
         super().__init__()
         self.loss_fct = None
@@ -209,7 +215,6 @@ class SpanV2Loss(nn.Module):
         elif args.loss_type == "focal":
             self.loss_fct = FocalLoss(reduction='none', 
                 gamma=args.focal_gamma, alpha=args.focal_alpha) # TODO:
-    
     def forward(self, 
         logits=None,        # (batch_size, num_spans, num_labels)
         label=None,         # (batch_size, num_spans)
@@ -217,25 +222,6 @@ class SpanV2Loss(nn.Module):
     ):
         num_labels = logits.size(-1)
         loss_mask = mask.view(-1) == 1
-
-        if args.do_pseudo:
-            proba = logits.softmax(dim=-1)
-            proba, index = proba.max(dim=-1)
-
-            is_pseudo = label == PSEUDO_TAG
-            label = torch.where(is_pseudo, index, label)        # 用预测标签替换无标签
-            pseudo_valid_mask = is_pseudo & (
-                proba > args.pseudo_proba_thresh
-            )                                                   # 有效伪标签：是伪标签、且大于阈值
-            # pseudo_valid_mask = is_pseudo & (
-            #     proba > args.pseudo_proba_thresh
-            # ) & (
-            #     index != 0
-            # )                                                   # 有效伪标签：是伪标签、且大于阈值、是实体
-            loss_mask = (mask == 1) & (~is_pseudo)              # 重新初始化loss_mask：真实标签
-            loss_mask = loss_mask | pseudo_valid_mask           # 合并`真实标签`和`有效伪标签`
-            loss_mask = loss_mask.view(-1)
-
         loss = self.loss_fct(logits.view(-1, num_labels), label.view(-1))
         loss = loss[loss_mask].mean()
         return loss
@@ -273,7 +259,8 @@ def forward(
     )
 
     sequence_output = outputs[0]
-    sequence_output = cls.dropout(sequence_output)
+    if not cls.config.do_mdp:
+        sequence_output = cls.dropout(sequence_output)
     logits = cls.span(sequence_output, spans)  # (batch_size, num_spans, num_labels)
 
     total_loss = None
@@ -293,7 +280,6 @@ def forward(
     )
 
 def compute_kl_loss(p, q, pad_mask=None):
-
     batch_size, num_spans, num_labels = p.size()
     if pad_mask is None:
         pad_mask = torch.ones(batch_size, num_spans, dtype=torch.bool, device=p.device)
@@ -313,22 +299,6 @@ def compute_kl_loss(p, q, pad_mask=None):
     loss = (p_loss + q_loss) / 2
     return loss
 
-# def compute_kl_loss(p, q, pad_mask=None):
-
-#     batch_size, num_spans, num_labels = p.size()
-#     if pad_mask is None:
-#         pad_mask = torch.ones(batch_size, num_spans, dtype=torch.bool, device=p.device)
-#     pad_mask = pad_mask.unsqueeze(-1).expand(batch_size, num_spans, num_labels)
-
-#     p_loss = F.kl_div(F.log_softmax(p, dim=-1), F.softmax(q, dim=-1), reduction='none')
-#     q_loss = F.kl_div(F.log_softmax(q, dim=-1), F.softmax(p, dim=-1), reduction='none')
-    
-#     mask_valid = ~pad_mask
-#     p_loss = p_loss[mask_valid].mean()
-#     q_loss = q_loss[mask_valid].mean()
-#     loss = (p_loss + q_loss) / 2
-
-#     return loss
 
 def forward_rdrop(cls, alpha, **kwargs):
     outputs1 = forward(cls, **kwargs)
@@ -339,7 +309,6 @@ def forward_rdrop(cls, alpha, **kwargs):
         outputs1["logits"], outputs2["logits"], 
         kwargs["span_mask"] == 0)
     total_loss = (outputs1["loss"] + outputs2["loss"]) / 2. + alpha * rdrop_loss
-    # total_loss = (outputs1["loss"] + outputs2["loss"]) + alpha * rdrop_loss
     return TokenClassifierOutput(
         loss=total_loss,
         logits=outputs1["logits"],
@@ -363,6 +332,28 @@ class BertSpanV2ForNer(BertPreTrainedModel):
             return forward_rdrop(self, args.rdrop_alpha, **kwargs)
         return forward(self, **kwargs)
 
+
+class MultiSampleDropoutSpanV2(nn.Module):
+    '''
+    # multisample dropout (wut): https://arxiv.org/abs/1905.09788
+    '''
+
+    def __init__(self, config, mdp_k=5, mdp_p=0.2):
+        super().__init__()
+        self.K = mdp_k
+        self.dropout = nn.Dropout(mdp_p)
+        self.classifier = SpanV2(config.hidden_size, config.num_labels,
+            config.max_span_length, config.width_embedding_dim)
+
+    def forward(self, sequence_output, spans):
+        for i in range(self.K):
+            if i == 0:
+                logits = self.classifier(self.dropout(sequence_output),spans)
+            else:
+                logits += self.classifier(self.dropout(sequence_output),spans)
+        logits = logits / self.K
+        return logits
+
 class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
 
     def __init__(self, config):
@@ -370,8 +361,11 @@ class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
 
         self.bert = NeZhaModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.span = SpanV2(config.hidden_size, config.num_labels, 
-            config.max_span_length, config.width_embedding_dim)
+        if config.do_mdp:
+            self.span = MultiSampleDropoutSpanV2(config)
+        else:
+            self.span = SpanV2(config.hidden_size, config.num_labels,
+                config.max_span_length, config.width_embedding_dim)
         self.init_weights()
 
     def forward(self, **kwargs):
@@ -379,55 +373,21 @@ class NeZhaSpanV2ForNer(NeZhaPreTrainedModel):
             return forward_rdrop(self, args.rdrop_alpha, **kwargs)
         return forward(self, **kwargs)
 
-
-class ExponentialMovingAverage(object):
-    '''
-    # 初始化
-    ema = EMA(model, 0.999)
-    # 训练过程中，更新完参数后，同步update shadow weights
-    def train():
-        optimizer.step()
-        ema.update(model)
-    # eval前，apply shadow weights；
-    # eval之后（保存模型后），恢复原来模型的参数
-    def evaluate():
-        ema.apply_shadow(model)
-        # evaluate
-        ema.restore(modle)
-    '''
-    def __init__(self,model, decay, device):
-        self.decay = decay
-        self.device = device
-        self.shadow = {}
-        self.backup = {}
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                # self.shadow[name] = param.data.clone().cpu()  # 显存内存数值拷贝对精度影响较大
-                self.shadow[name] = param.data.clone()
-
-    def update(self,model):
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                assert name in self.shadow
-                # new_average = (1.0 - self.decay) * param.data.cpu() + self.decay * self.shadow[name]
-                new_average = (1.0 - self.decay) * param.data + self.decay * self.shadow[name]
-                self.shadow[name] = new_average.clone()
-
-    def apply_shadow(self,model):
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                assert name in self.shadow
-                # self.backup[name] = param.data.cpu()
-                self.backup[name] = param.data
-                param.data = self.shadow[name].to(self.device)
-
-    def restore(self,model):
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                assert name in self.backup
-                param.data = self.backup[name].to(self.device)
-        self.backup = {}
-
+# class RoformerSpanV2ForNer(RoFormerPreTrainedModel):
+#
+#     def __init__(self, config):
+#         super().__init__(config)
+#
+#         self.roformer = RoFormerModel(config)
+#         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+#         self.span = SpanV2(config.hidden_size, config.num_labels,
+#             config.max_span_length, config.width_embedding_dim)
+#         self.init_weights()
+#
+#     def forward(self, **kwargs):
+#         if args.rdrop_alpha is not None:
+#             return forward_rdrop(self, args.rdrop_alpha, **kwargs)
+#         return forward(self, **kwargs)
 
 class NerArgumentParser(ArgumentParser):
 
@@ -468,23 +428,13 @@ class NerArgumentParser(ArgumentParser):
         
         self.add_argument("--max_span_length", default=50, type=int)
         self.add_argument("--width_embedding_dim", default=128, type=int)
-        self.add_argument("--span_proba_thresh", default=0., type=float)
         self.add_argument("--optimizer", default="adamw", type=str)
-        # self.add_argument("--scheduler", default="linear", type=str)
         # self.add_argument("--context_window", default=0, type=int)
         self.add_argument("--augment_context_aware_p", default=None, type=float)
         self.add_argument("--augment_entity_replace_p", default=None, type=float)
         self.add_argument("--rdrop_alpha", default=None, type=float)
         self.add_argument("--vat_alpha", default=None, type=float)
-        self.add_argument("--do_ema", action="store_true")
-        self.add_argument("--ema_start_epoch", default=None, type=int)
-
-        self.add_argument("--do_pseudo", action="store_true")
-        self.add_argument("--pseudo_data_dir", default=None, type=str)
-        self.add_argument("--pseudo_data_file", default=None, type=str)
-        self.add_argument("--pseudo_num_sample", default=None, type=int)
-        self.add_argument("--pseudo_proba_thresh", default=0.99, type=float)
-
+        
         # Other parameters
         self.add_argument('--scheme', default='IOB2', type=str,
                             choices=['IOB2', 'IOBES'])
@@ -527,6 +477,8 @@ class NerArgumentParser(ArgumentParser):
         self.add_argument('--fgm_name', default='word_embeddings', type=str,
                             help="name for adversarial layer.")
 
+
+
         self.add_argument("--per_gpu_train_batch_size", default=8, type=int,
                             help="Batch size per GPU/CPU for training.")
         self.add_argument("--per_gpu_eval_batch_size", default=8, type=int,
@@ -567,6 +519,14 @@ class NerArgumentParser(ArgumentParser):
                                 "See details at https://nvidia.github.io/apex/amp.html", )
         self.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
 
+        self.add_argument("--do_swa", action="store_true")
+        self.add_argument("--swa_start", type=int, default=1)
+        self.add_argument("--swa_type", type=str, default='weight',choices=['weight', 'avg'])
+
+        self.add_argument("--do_pgd", action="store_true")
+        self.add_argument("--pgd_k", type=int, default=3)
+
+        self.add_argument("--do_mdp", action="store_true")
         return self
 
 class NerProcessor(DataProcessor):
@@ -582,10 +542,6 @@ class NerProcessor(DataProcessor):
     def get_test_examples(self, data_dir, data_file):
         """Gets a collection of :class:`InputExample` for the test set."""
         return list(self._create_examples(data_dir, data_file, 'test'))
-
-    def get_pseudo_examples(self, data_dir, data_file):
-        """Gets a collection of :class:`InputExample` for the pseudo set."""
-        return list(self._create_examples(data_dir, data_file, 'pseudo'))
     
     @property
     def label2id(self):
@@ -611,27 +567,21 @@ class CailNerProcessor(NerProcessor):
     
     def _create_examples(self, data_dir, data_file, mode):
         data_path = os.path.join(data_dir, data_file)
-        logger.info(f"Creating examples from {data_path}...")
         with open(data_path, encoding="utf-8") as f:
             lines = [json.loads(line) for line in f.readlines()]
-        # 无标签数据数量限制
-        if mode == "pseudo" and args.pseudo_num_sample is not None:
-            random.shuffle(lines)
-            lines = lines[:args.pseudo_num_sample]
-        logger.info(f"Totally {len(lines)} examples.")
-        for sentence_counter, line in enumerate(lines):
-            sentence = (
-                sentence_counter,
-                {
-                    "id": f"{mode}-{str(line['id'])}",
-                    "tokens": list(line["text"]),
-                    "entities": line.get("entities", None) 
-                        if mode in ["train", "dev"] else None,
-                    "sent_start": line["sent_start"],
-                    "sent_end": line["sent_end"],
-                }
-            )
-            yield sentence
+            for sentence_counter, line in enumerate(lines):
+                sentence = (
+                    sentence_counter,
+                    {
+                        "id": f"{mode}-{str(line['id'])}",
+                        "tokens": list(line["text"]),
+                        "entities": line.get("entities", None) 
+                            if mode in ["train", "dev"] else None,
+                        "sent_start": line["sent_start"],
+                        "sent_end": line["sent_end"],
+                    }
+                )
+                yield sentence
 
 class NerDataset(torch.utils.data.Dataset):
 
@@ -676,10 +626,8 @@ class AugmentContextAware:
         self.p = p
 
         self.augment_entity_meanings = [
-            # "物品价值", "被盗货币", "盗窃获利",
-            # "被盗物品", "作案工具", 
-            "受害人", "犯罪嫌疑人",
-            # "地点", "组织机构",
+            "物品价值", "被盗货币", "盗窃获利", 
+            "受害人", "犯罪嫌疑人"
         ]
 
     def __call__(self, example):
@@ -768,7 +716,6 @@ class ReDataMasking:
     def __call__(self, example):
         ...
 
-
 class Example2Feature:
     
     def __init__(self, tokenizer, label2id, max_seq_length, max_span_length):
@@ -790,7 +737,8 @@ class Example2Feature:
         span_mask = torch.tensor([span_mask])       # (1, num_spans)
         return spans, span_mask
 
-    def _encode_label(self, entities, spans, tag_o):
+    def _encode_label(self, entities, spans):
+        tag_o = self.label2id["O"]
         entities = {(b + 1, e + 1): self.label2id[t] for t, b, e, _ in entities}
         label = [entities.get((b, e), tag_o) for b, e, l in spans[0]]
         label = torch.tensor([label])               # (1, num_spans)
@@ -817,25 +765,17 @@ class Example2Feature:
         inputs["input_len"] = inputs["attention_mask"].sum(dim=1)  # for special tokens
         input_len = inputs["input_len"].item()
         inputs["spans"], inputs["span_mask"] = self._encode_span(
-            input_len, input_len, sent_start + 1, sent_end + 1)  # dynamic batch
+            input_len, input_len, sent_start, sent_end)  # dynamic batch
         inputs["sent_start"] = torch.tensor([sent_start])
         inputs["sent_end"] = torch.tensor([sent_end])
         
-        tag_o = self.label2id["O"]
-
-        if args.do_pseudo:
-            is_pseudo_example = id_.startswith("pseudo")
-            if is_pseudo_example:
-                entities = []
-                tag_o = PSEUDO_TAG
-
         if entities is None:
             inputs["label"] = None
             return inputs
 
         # encode label
         inputs["label"] = self._encode_label(entities, 
-            inputs["spans"].cpu().numpy().tolist(), tag_o)
+            inputs["spans"].cpu().numpy().tolist())
         return inputs
 
 class FGM():
@@ -861,6 +801,95 @@ class FGM():
                 assert name in self.backup
                 param.data = self.backup[name]
         self.backup = {}
+
+class PGD:
+    def __init__(self, model, eps=1., alpha=0.3):
+        self.model = (
+            model.module if hasattr(model, "module") else model
+        )
+        self.eps = eps
+        self.alpha = alpha
+        self.emb_backup = {}
+        self.grad_backup = {}
+
+    def attack(self, emb_name='word_embeddings', is_first_attack=False):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad and emb_name in name:
+                if is_first_attack:
+                    self.emb_backup[name] = param.data.clone()
+                norm = torch.norm(param.grad)
+                if norm != 0 and not torch.isnan(norm):
+                    r_at = self.alpha * param.grad / norm
+                    param.data.add_(r_at)
+                    param.data = self.project(name, param.data)
+
+    def restore(self, emb_name='word_embeddings'):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad and emb_name in name:
+                assert name in self.emb_backup
+                param.data = self.emb_backup[name]
+        self.emb_backup = {}
+
+    def project(self, param_name, param_data):
+        r = param_data - self.emb_backup[param_name]
+        if torch.norm(r) > self.eps:
+            r = self.eps * r / torch.norm(r)
+        return self.emb_backup[param_name] + r
+
+    def backup_grad(self):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad and param.grad is not None:
+                self.grad_backup[name] = param.grad.clone()
+
+    def restore_grad(self):
+        for name, param in self.model.named_parameters():
+            if param.requires_grad and param.grad is not None:
+                param.grad = self.grad_backup[name]
+
+def get_model_path_list(base_dir):
+    """
+    从文件夹中获取 model.pt 的路径
+    """
+    model_lists = []
+
+    for root, dirs, files in os.walk(base_dir):
+        for _file in files:
+            if 'pytorch_model.bin' == _file:
+                model_lists.append(os.path.join(root, _file))
+    model_lists = [x for x in model_lists if 'checkpoint-' in x and 'swa' not in x]
+    model_lists = sorted(model_lists,
+                         key=lambda x: int(x.split('/')[-2].split('-')[-1]))
+    print(model_lists)
+
+    return model_lists
+
+def swa(model, model_dir, swa_type='weight',swa_start=1):
+    """
+    swa 滑动平均模型，一般在训练平稳阶段再使用 SWA
+    """
+    model_path_list = get_model_path_list(model_dir)
+    # assert 1 <= swa_start < len(model_path_list) - 1, \
+    #     f'Using swa, swa start should smaller than {len(model_path_list) - 1} and bigger than 0'
+    swa_model = copy.deepcopy(model)
+    swa_n = 0.
+    with torch.no_grad():
+        for _ckpt in model_path_list[swa_start:]:
+            logger.info(f'Load model from {_ckpt}')
+            model.load_state_dict(torch.load(_ckpt, map_location=torch.device('cpu')))
+            tmp_para_dict = dict(model.named_parameters())
+            alpha = 1. / (swa_n + 1.)
+            for name, para in swa_model.named_parameters():
+                para.copy_(tmp_para_dict[name].data.clone() * alpha + para.data.clone() * (1. - alpha))
+            swa_n += 1
+    # use 100000 to represent swa to avoid clash
+    swa_model_dir = os.path.join(model_dir, f'checkpoint-swa-{swa_type}')
+    if not os.path.exists(swa_model_dir):
+        os.mkdir(swa_model_dir)
+    logger.info(f'Save swa model in: {swa_model_dir}')
+    swa_model_path = os.path.join(swa_model_dir, 'pytorch_model.bin')
+    torch.save(swa_model.state_dict(), swa_model_path)
+    return swa_model
+
 
 def seed_everything(seed=None, reproducibility=True):
     '''
@@ -903,7 +932,7 @@ def init_logger(name, log_file='', log_file_level=logging.NOTSET):
 
 def train(args, model, processor, tokenizer):
     """ Train the model """
-    train_dataset = load_dataset(args, processor, tokenizer, data_type="pseudo" if args.do_pseudo else 'train')
+    train_dataset = load_dataset(args, processor, tokenizer, data_type='train')
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size,
@@ -917,13 +946,13 @@ def train(args, model, processor, tokenizer):
         args.logging_steps = args.save_steps = int(t_total // args.num_train_epochs)
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ["bias", "LayerNorm.weight"]
-    base_model_param_optimizer = list(model.base_model.named_parameters())
-    base_model_param_optimizer_ids = [id(p) for n, p in base_model_param_optimizer]
-    other_param_optimizer = [(n, p) for n, p in model.named_parameters() if id(p) not in base_model_param_optimizer_ids]
+    bert_param_optimizer = list(model.roformer.named_parameters()) if 'roformer' in args.model_type else list(model.bert.named_parameters())
+    bert_param_optimizer_ids = [id(p) for n, p in bert_param_optimizer]
+    other_param_optimizer = [(n, p) for n, p in model.named_parameters() if id(p) not in bert_param_optimizer_ids]
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in base_model_param_optimizer if not any(nd in n for nd in no_decay)],
+        {'params': [p for n, p in bert_param_optimizer if not any(nd in n for nd in no_decay)],
          'weight_decay': args.weight_decay, 'lr': args.learning_rate},
-        {'params': [p for n, p in base_model_param_optimizer if any(nd in n for nd in no_decay)], 
+        {'params': [p for n, p in bert_param_optimizer if any(nd in n for nd in no_decay)], 
          'weight_decay': 0.0, 'lr': args.learning_rate},
         {'params': [p for n, p in other_param_optimizer], 
          'weight_decay': args.weight_decay, 'lr': args.other_learning_rate}
@@ -935,12 +964,6 @@ def train(args, model, processor, tokenizer):
         optimizer = Lamb(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
                                                 num_training_steps=t_total)
-    # if args.scheduler == "linear":
-    #     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
-    #                                                 num_training_steps=t_total)
-    # elif args.scheduler == "cosine":
-    #     scheduler = get_cosine_with_hard_restarts_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
-    #                                                 num_training_steps=t_total, num_cycles=1)
     # Check if saved optimizer or scheduler states exist
     if os.path.isfile(os.path.join(args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
             os.path.join(args.model_name_or_path, "scheduler.pt")):
@@ -953,6 +976,7 @@ def train(args, model, processor, tokenizer):
         except ImportError:
             raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level)
+        scaler = torch.cuda.amp.GradScaler()
     # multi-gpu training (should be after apex fp16 initialization)
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
@@ -963,8 +987,8 @@ def train(args, model, processor, tokenizer):
                                                           find_unused_parameters=True)
     if args.do_fgm:
         fgm = FGM(model, emb_name=args.fgm_name, epsilon=args.fgm_epsilon)
-    if args.do_ema:
-        ema = None
+    if args.do_pgd:
+        pgd = PGD(model=model)
     # Train!
     logger.info("***** Running training *****")
     logger.info("  Num examples = %d", len(train_dataset))
@@ -979,38 +1003,16 @@ def train(args, model, processor, tokenizer):
     logger.info("  Total optimization steps = %d", t_total)
 
     global_step = 0
-    steps_trained_in_current_epoch = 0
-    # Check if continuing training from a checkpoint
-    if os.path.exists(args.model_name_or_path) and "checkpoint" in args.model_name_or_path:
-        # set global_step to gobal_step of last saved checkpoint from model path
-        global_step = int(args.model_name_or_path.split("-")[-1].split("/")[0])
-        epochs_trained = global_step // (len(train_dataloader) // args.gradient_accumulation_steps)
-        steps_trained_in_current_epoch = global_step % (len(train_dataloader) // args.gradient_accumulation_steps)
-        logger.info("  Continuing training from checkpoint, will skip to saved global_step")
-        logger.info("  Continuing training from epoch %d", epochs_trained)
-        logger.info("  Continuing training from global step %d", global_step)
-        logger.info("  Will skip the first %d steps in the first epoch", steps_trained_in_current_epoch)
 
     tr_loss, logging_loss, best_f1 = 0.0, 0.0, 0.0
     model.zero_grad()
     seed_everything(args.seed)  # Added here for reproductibility (even between python 2 and 3)
     for epoch_no in range(int(args.num_train_epochs)):
         pbar = tqdm(enumerate(train_dataloader), total=len(train_dataloader), desc='Training...')
-        if args.do_ema and ema is None and epoch_no >= args.ema_start_epoch:
-            logger.info("Start doing Exponential Moving Averaging(EMA).")
-            ema = ExponentialMovingAverage(model, decay=0.999, device=args.device)
         for step, batch in pbar:
             # Skip past any already trained steps if resuming training
-            if steps_trained_in_current_epoch > 0:
-                steps_trained_in_current_epoch -= 1
-                continue
             model.train()
             batch = {k: v.to(args.device) for k, v in batch.items() if v is not None}
-            if args.model_type != "distilbert":
-                # XLM and RoBERTa don"t use segment_ids
-                if args.model_type.split('_')[0] in ["roberta", "xlnet"]:
-                    batch["token_type_ids"] = None
-
             outputs = model(**batch)
             loss = outputs['loss']  # model outputs are always tuple in pytorch-transformers (see doc)
             if args.n_gpu > 1:
@@ -1027,7 +1029,7 @@ def train(args, model, processor, tokenizer):
                 outputs_adv = model(**batch)
                 loss_adv = outputs_adv[0]
                 if args.vat_alpha is not None:
-                    loss_vat = compute_kl_loss(outputs["logits"], outputs_adv["logits"], 
+                    loss_vat = compute_kl_loss(outputs["logits"], outputs_adv["logits"],
                         pad_mask=batch["span_mask"] == 0)
                     loss_adv = loss_adv + args.vat_alpha * loss_vat
                 if args.n_gpu > 1:
@@ -1040,6 +1042,26 @@ def train(args, model, processor, tokenizer):
                 else:
                     loss_adv.backward()
                 fgm.restore()
+            if args.do_pgd:
+                pgd.backup_grad()
+                for _t in range(args.pgd_k):
+                    pgd.attack(is_first_attack=(_t == 0))
+                    if _t != args.pgd_k - 1:
+                        model.zero_grad()
+                    else:
+                        pgd.restore_grad()
+                    if args.fp16:
+                        with ac():
+                            loss_adv = model(**batch)[0]
+                    else:
+                        loss_adv = model(**batch)[0]
+                    if args.n_gpu > 1:
+                        loss_adv = loss_adv.mean()
+                    if args.fp16:
+                        scaler.scale(loss_adv).backward()
+                    else:
+                        loss_adv.backward()
+                pgd.restore()
             pbar.set_description(desc=f"Training[{epoch_no}]... loss={loss.item():.6f}")
             tr_loss += loss.item()
             if (step + 1) % args.gradient_accumulation_steps == 0:
@@ -1050,8 +1072,6 @@ def train(args, model, processor, tokenizer):
                 optimizer.step()
                 scheduler.step()  # Update learning rate schedule
                 model.zero_grad()
-                if args.do_ema and ema is not None:
-                    ema.update(model)
                 global_step += 1
                 if args.local_rank in [-1, 0] and args.evaluate_during_training and \
                     args.logging_steps > 0 and global_step % args.logging_steps == 0:
@@ -1063,61 +1083,36 @@ def train(args, model, processor, tokenizer):
                         logger.info(f"[{epoch_no}] loss={eval_results.pop('loss')}")
                         for entity, metrics in eval_results.items():
                             logger.info("{:*^50s}".format(entity))
-                            logger.info("\t".join(f"{metric:s}={value:f}" 
+                            logger.info("\t".join(f"{metric:s}={value:f}"
                                 for metric, value in metrics.items()))
                         if args.save_best_checkpoints:
                             if eval_results["avg"]["f"] > best_f1:
+                                logger.info(f'epoch-[{epoch_no}] best entity F1 score: {best_f1} --> {eval_results["avg"]["f"]}')
                                 best_f1 = eval_results["avg"]["f"]
                                 # Save model checkpoint
-                                output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(
-                                    global_step if not args.save_best_checkpoints else 999999))
+                                output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(999999))
                                 if not os.path.exists(output_dir):
                                     os.makedirs(output_dir)
                                 model_to_save = (
                                     model.module if hasattr(model, "module") else model
                                 )  # Take care of distributed/parallel training
                                 model_to_save.save_pretrained(output_dir)
-                                torch.save(args, os.path.join(output_dir, "training_args.bin"))
                                 logger.info("Saving model checkpoint to %s", output_dir)
                                 tokenizer.save_vocabulary(output_dir)
-                                torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
-                                torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
                                 logger.info("Saving optimizer and scheduler states to %s", output_dir)
-
-                            if args.do_ema and ema is not None:
-                                logger.info("{:*^50s}".format("EMA"))
-                                ema.apply_shadow(model)
-                                eval_results_ema = evaluate(args, model, processor, tokenizer)
-                                logger.info(f"[{epoch_no}] loss={eval_results_ema.pop('loss')}")
-                                for entity, metrics in eval_results_ema.items():
-                                    logger.info("{:*^50s}".format(entity))
-                                    logger.info("\t".join(f"{metric:s}={value:f}" 
-                                        for metric, value in metrics.items()))
-                                if eval_results_ema["avg"]["f"] > best_f1:
-                                    model_to_save = (
-                                        model.module if hasattr(model, "module") else model
-                                    )  # Take care of distributed/parallel training
-                                    model_to_save.save_pretrained(output_dir)
-                                    logger.info("Saving model checkpoint to %s", output_dir)
-                                ema.restore(model)
-                                
-                elif args.local_rank in [-1, 0] and not args.evaluate_during_training and \
-                        args.save_steps > 0 and global_step % args.save_steps == 0:
-                    # Save model checkpoint
-                    output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(
-                        global_step if not args.save_best_checkpoints else 999999))
-                    if not os.path.exists(output_dir):
-                        os.makedirs(output_dir)
-                    model_to_save = (
-                        model.module if hasattr(model, "module") else model
-                    )  # Take care of distributed/parallel training
-                    model_to_save.save_pretrained(output_dir)
-                    torch.save(args, os.path.join(output_dir, "training_args.bin"))
-                    logger.info("Saving model checkpoint to %s", output_dir)
-                    tokenizer.save_vocabulary(output_dir)
-                    torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
-                    torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
-                    logger.info("Saving optimizer and scheduler states to %s", output_dir)
+                        else:
+                            logger.info(f'epoch-[{epoch_no}] F1 score: {eval_results["avg"]["f"]}')
+                            # Save model checkpoint
+                            output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(epoch_no))
+                            if not os.path.exists(output_dir):
+                                os.makedirs(output_dir)
+                            model_to_save = (
+                                model.module if hasattr(model, "module") else model
+                            )  # Take care of distributed/parallel training
+                            model_to_save.save_pretrained(output_dir)
+                            logger.info("Saving model checkpoint to %s", output_dir)
+                            tokenizer.save_vocabulary(output_dir)
+                            logger.info("Saving optimizer and scheduler states to %s", output_dir)
         logger.info("\n")
         if 'cuda' in str(args.device):
             torch.cuda.empty_cache()
@@ -1143,7 +1138,6 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
     if isinstance(model, nn.DataParallel):
         model = model.module
     model.eval()
-
     y_true = []; y_pred = []
     id2label = processor.id2label
     for step, batch in pbar:
@@ -1161,7 +1155,6 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
             tmp_eval_loss = tmp_eval_loss.mean()  # mean() to average on multi-gpu parallel evaluating
         eval_loss += tmp_eval_loss.item()
         nb_eval_steps += 1
-        
         # calculate metrics
         # preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"])
         # for pred_no, (pred, input_len, start, end) in enumerate(zip(
@@ -1208,7 +1201,7 @@ def evaluate(args, model, processor, tokenizer, prefix=""):
     results['loss'] = eval_loss / nb_eval_steps
     return results
     
-def predict_decode_batch(example, batch, id2label, thresh=0., post_process=True):
+def predict_decode_batch(example, batch, id2label, post_process=True):
     # if example["id"].split("-")[-1] == "033522d9bdf796d13c4b594cbdf03184":
     #     print()
     is_intersect = lambda a, b: min(a[1], b[1]) - max(a[0], b[0]) > 0
@@ -1249,7 +1242,7 @@ def predict_decode_batch(example, batch, id2label, thresh=0., post_process=True)
 
     text = "".join(example["tokens"])
     logits = batch["logits"]
-    preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"], thresh=thresh)
+    preds = SpanV2.decode_batch(logits, batch["spans"], batch["span_mask"])
     pred, input_len = preds[0], batch["input_len"][0]
     start, end = batch["sent_start"].item(), batch["sent_end"].item()
     pred = [(id2label[t], b, e) for t, b, e in pred if id2label[t] != "O"]
@@ -1311,31 +1304,31 @@ def predict_decode_batch(example, batch, id2label, thresh=0., post_process=True)
             entities = spans2entities(spans)
             label_entities_map[label] = entities
 
-        # 1. 若存在被盗货币实体重叠，保留最长的；2. 被盗货币要和人名联系
-        meaning = "被盗货币"
-        label = MEANING_LABEL_MAP[meaning]
-        entities = label_entities_map[label]                            # 左闭右开
-        if entities:
-            spans = entities2spans(entities)
-            spans = list(filter(lambda x: not is_contain_special_char(x), spans))
-            # # TODO: >>> 姓名处理 >>>
-            # entities_name = label_entities_map[MEANING_LABEL_MAP["受害人"]]
-            # spans_name = entities2spans(entities_name)
-            # # 加入`受害人+被盗货币`的组合
-            # spans.extend([(a[0], b[1]) for a, b in itertools.product(
-            #     spans_name, spans) if a[1] - b[0] in [-1, 0]])
-            # # `受害人+被盗货币`、`被盗货币`，优先保留`受害人+被盗货币`
-            # is_todel = [False] * len(spans)
-            # for i, a in enumerate(spans_name):
-            #     for j, b in enumerate(spans):
-            #         u = (a[0], b[1])
-            #         if u in spans and u != b:
-            #             is_todel[j] = True
-            # spans = [span for flag, span in zip(is_todel, spans) if not flag]
-            # # <<< 姓名处理 <<<
-            spans = merge_spans(spans, keep_type="long")
-            entities = spans2entities(spans)
-            label_entities_map[label] = entities
+        # # TODO: 1. 若存在被盗货币实体重叠，保留最长的；2. 被盗货币要和人名联系
+        # meaning = "被盗货币"
+        # label = MEANING_LABEL_MAP[meaning]
+        # entities = label_entities_map[label]                            # 左闭右开
+        # if entities:
+        #     spans = entities2spans(entities)
+        #     spans = list(filter(lambda x: not is_contain_special_char(x), spans))
+        #     # # TODO: >>> 姓名处理 >>>
+        #     # entities_name = label_entities_map[MEANING_LABEL_MAP["受害人"]]
+        #     # spans_name = entities2spans(entities_name)
+        #     # # 加入`受害人+被盗货币`的组合
+        #     # spans.extend([(a[0], b[1]) for a, b in itertools.product(
+        #     #     spans_name, spans) if a[1] - b[0] in [-1, 0]])
+        #     # # `受害人+被盗货币`、`被盗货币`，优先保留`受害人+被盗货币`
+        #     # is_todel = [False] * len(spans)
+        #     # for i, a in enumerate(spans_name):
+        #     #     for j, b in enumerate(spans):
+        #     #         u = (a[0], b[1])
+        #     #         if u in spans and u != b:
+        #     #             is_todel[j] = True
+        #     # spans = [span for flag, span in zip(is_todel, spans) if not flag]
+        #     # # <<< 姓名处理 <<<
+        #     spans = merge_spans(spans, keep_type="long")
+        #     entities = spans2entities(spans)
+        #     label_entities_map[label] = entities
 
         # 受害人和犯罪嫌疑人设置最长实体限制(10)
         for meaning in ["受害人", "犯罪嫌疑人"]:
@@ -1404,7 +1397,7 @@ def predict(args, model, processor, tokenizer, prefix=""):
             batch.pop("token_type_ids")
         # 解码输出
         example = test_dataset.examples[step][1]
-        results.append(predict_decode_batch(example, batch, id2label, args.span_proba_thresh, post_process=True))
+        results.append(predict_decode_batch(example, batch, id2label, post_process=True))
         # for k-fold
         batch_all.append({k: v.detach().cpu() for k, v in batch.items()})
     logger.info("\n")
@@ -1421,7 +1414,8 @@ PROCESSER_CLASS = {
 
 MODEL_CLASSES = {
     "bert_span": (BertConfigSpanV2, BertSpanV2ForNer, BertTokenizer),
-    "nezha_span": (BertConfigSpanV2, NeZhaSpanV2ForNer, BertTokenizer),
+    "nezha_span": (NeZhaConfigSpanV2, NeZhaSpanV2ForNer, BertTokenizer),
+    # 'roformer_span':(RoformerConfigSpanV2, RoformerSpanV2ForNer, BertTokenizer),
 }
 
 def load_dataset(args, processor, tokenizer, data_type='train'):
@@ -1431,12 +1425,8 @@ def load_dataset(args, processor, tokenizer, data_type='train'):
         examples = processor.get_train_examples(args.data_dir, args.train_file)
     elif data_type == 'dev':
         examples = processor.get_dev_examples(args.data_dir, args.dev_file)
-    elif data_type == "test":
+    else:
         examples = processor.get_test_examples(args.data_dir, args.test_file)
-    elif data_type == 'pseudo':
-        examples = processor.get_train_examples(args.data_dir, args.train_file)
-        examples_pseudo = processor.get_pseudo_examples(args.pseudo_data_dir, args.pseudo_data_file)
-        examples.extend(examples_pseudo)
     if args.local_rank == 0 and not evaluate:
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
     max_seq_length = args.train_max_seq_length if data_type == 'train' else args.eval_max_seq_length
@@ -1448,9 +1438,7 @@ def load_dataset(args, processor, tokenizer, data_type='train'):
         Example2Feature(tokenizer, processor.label2id, max_seq_length, config.max_span_length),
     ])
 
-
 if __name__ == "__main__":
-
     parser = NerArgumentParser()
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
@@ -1458,11 +1446,9 @@ if __name__ == "__main__":
         args = parser.parse_args_from_json(json_file=os.path.abspath(sys.argv[1]))
     else:
         args = parser.build_arguments().parse_args()
-    # args = parser.parse_args_from_json(json_file="args/pred.1.json")
-
+    # args = parser.parse_args_from_json(json_file="output/ner-cail_ner-bert_span-rdrop0.1-fgm1.0-fold3-42/training_args.json")
     # Set seed before initializing model.
     seed_everything(args.seed)
-    
     # User-defined post initialization
     output_dir = f"{args.task_name}-{args.dataset_name}-{args.model_type}-{args.version}-{args.seed}"
     if not args.output_dir.endswith(output_dir):
@@ -1474,7 +1460,7 @@ if __name__ == "__main__":
     os.makedirs(args.cache_dir, exist_ok=True)
 
     # Setup logging
-    time_ = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime())
+    time_ = time.strftime("%Y-%m-%d-%H%M%S", time.localtime())
     logger = init_logger(__name__, log_file=os.path.join(args.output_dir, f'{time_}.log'))
     # Log on each process the small summary:
     logger.warning(
@@ -1508,7 +1494,6 @@ if __name__ == "__main__":
     args.id2label = {i: label for i, label in enumerate(label_list)}
     args.label2id = {label: i for i, label in enumerate(label_list)}
     num_labels = len(label_list)
-
     # Load pretrained model and tokenizer
     #
     # Distributed training:
@@ -1523,7 +1508,8 @@ if __name__ == "__main__":
     if args.do_train:
         config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
                                             num_labels=num_labels, max_span_length=args.max_span_length,
-                                            cache_dir=args.cache_dir if args.cache_dir else None, )
+                                            cache_dir=args.cache_dir if args.cache_dir else None)
+        config.do_mdp = args.do_mdp
         tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
                                                     do_lower_case=args.do_lower_case,
                                                     cache_dir=args.cache_dir if args.cache_dir else None, )
@@ -1534,39 +1520,13 @@ if __name__ == "__main__":
         model.to(args.device)
         global_step, tr_loss = train(args, model, processor, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
-    # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
-    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        # 将early stop模型保存到输出目录下
-        if args.save_best_checkpoints:
-            best_checkpoints = os.path.join(args.output_dir, "checkpoint-999999")
-            logger.info("Loading model checkpoint from %s", best_checkpoints)
-            config = config_class.from_pretrained(best_checkpoints,
-                                                  num_labels=num_labels, max_span_length=args.max_span_length,
-                                                  cache_dir=args.cache_dir if args.cache_dir else None, )
-            tokenizer = tokenizer_class.from_pretrained(best_checkpoints,
-                                                        do_lower_case=args.do_lower_case, 
-                                                        cache_dir=args.cache_dir if args.cache_dir else None, )
-            model = model_class.from_pretrained(best_checkpoints, config=config, 
-                                                cache_dir=args.cache_dir if args.cache_dir else None)
-        # Create output directory if needed
-        if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
-            os.makedirs(args.output_dir)
-        logger.info("Saving model checkpoint to %s", args.output_dir)
-        # Save a trained model, configuration and tokenizer using `save_pretrained()`.
-        # They can then be reloaded using `from_pretrained()`
-        model_to_save = (
-            model.module if hasattr(model, "module") else model
-        )  # Take care of distributed/parallel training
-        model_to_save.save_pretrained(args.output_dir)
-        tokenizer.save_vocabulary(args.output_dir)
-        # Good practice: save your training arguments together with the trained model
-        torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
     # Evaluation
     results = {}
     if args.do_eval and args.local_rank in [-1, 0]:
         config = config_class.from_pretrained(args.output_dir,
                                               num_labels=num_labels, max_span_length=args.max_span_length,
                                               cache_dir=args.cache_dir if args.cache_dir else None, )
+        config.do_mdp = args.do_mdp
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         checkpoints = [args.output_dir]
         if args.eval_all_checkpoints:
@@ -1590,9 +1550,11 @@ if __name__ == "__main__":
                 writer.write("{} = {}\n".format(key, str(results[key])))
 
     if args.do_predict and args.local_rank in [-1, 0]:
+        args.output_dir = os.path.join(args.output_dir,'checkpoint-best')
         config = config_class.from_pretrained(args.output_dir,
                                               num_labels=num_labels, max_span_length=args.max_span_length,
                                               cache_dir=args.cache_dir if args.cache_dir else None, )
+        config.do_mdp = args.do_mdp
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         checkpoints = [args.output_dir]
         if args.predict_checkpoints > 0:
@@ -1605,6 +1567,39 @@ if __name__ == "__main__":
             prefix = checkpoint.split('/')[-1] if checkpoint.find('checkpoint') != -1 else ""
             model = model_class.from_pretrained(checkpoint, config=config)
             model.to(args.device)
-            predict(args, model, processor, tokenizer, prefix=prefix)
+            predict(args, model, processor, tokenizer)
 
+    if args.do_swa:
+        config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
+                                            num_labels=num_labels, max_span_length=args.max_span_length,
+                                            cache_dir=args.cache_dir if args.cache_dir else None)
+        config.do_mdp = args.do_mdp
+        tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
+                                                    do_lower_case=args.do_lower_case,
+                                                    cache_dir=args.cache_dir if args.cache_dir else None, )
+        model = model_class.from_pretrained(args.model_name_or_path, from_tf=bool(".ckpt" in args.model_name_or_path),
+                                            config=config, cache_dir=args.cache_dir if args.cache_dir else None)
+        if args.local_rank == 0:
+            torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
+        model.to(args.device)
+        swa_best_f1 = 0
+        # for swa_start in range(3,4):
+        # for swa_start in range(1,int(args.num_train_epochs)):
+        #     swa_raw_model = copy.deepcopy(model)
+        #     swa_model = swa(swa_raw_model, args.output_dir, swa_start=swa_start)
+        #     swa_eval_results = evaluate(args, swa_model, processor, tokenizer)
+        #     logger.info(f'swa_start: [{swa_start}] swa_f1={swa_eval_results["avg"]["f"]}')
+            # if swa_eval_results["avg"]["f"] > swa_best_f1:
+            #     swa_best_f1 = swa_eval_results["avg"]["f"]
+            #     swa_model_dir = os.path.join(model_dir, f'checkpoint-swa')
+            #     if not os.path.exists(swa_model_dir):
+            #         os.mkdir(swa_model_dir)
+            #     logger.info(f'Save swa model in: {swa_model_dir}')
+            #     swa_model_path = os.path.join(swa_model_dir, 'pytorch_model.bin')
+            #     torch.save(swa_model.state_dict(), swa_model_path)
+        # 手动
+        swa_raw_model = copy.deepcopy(model)
+        swa_model = swa(swa_raw_model, args.output_dir, swa_start=args.swa_start,swa_type=args.swa_type)
+        swa_eval_results = evaluate(args, swa_model, processor, tokenizer)
+        logger.info(f'swa_start: [{args.swa_start}] swa_f1={swa_eval_results["avg"]["f"]}')
 

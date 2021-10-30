@@ -6,7 +6,7 @@ output/*
 cache/*
 tmp/*
 data/*
+wandb/*
 .vscode/
 .ipynb_checkpoints/
 !.gitkeep
-！checksum

@@ -19,54 +19,92 @@ from tqdm import tqdm
 from collections import Counter
 from argparse import ArgumentParser
 
+def _strip(document):
+    document = document.split("指控", 1)
+    if len(document) == 2:
+        document = document[1]
+        if document[0] in ["：", "，"]:
+            document = document[1:]
+    else:
+        document = document[0]
+    return document
+
 def _process(document):
     document = re.sub(r"\s+", "", document)
     # document = document.translate({ord(f): ord(t) for f, t in zip(
     #     u',.!?[]()<>"\'', u'，。！？【】（）《》“‘')})
     return document
 
-def _split_doc(document):
+def _split_doc(document, max_length=256):
     sentences = re.split(r"[。；;]", document)
+    sentences = list(filter(lambda x: len(x) > 0, sentences))
+    for i, sentence in enumerate(sentences):
+        start_idx = document.find(sentence)
+        end_idx = start_idx + len(sentence)
+        if end_idx == len(document):
+            continue
+        sign = document[end_idx]
+        sentences[i] = sentence + sign
+    if max_length is not None:
+        sentences_new = []
+        sentence_new = ""
+        for sentence in sentences:
+            if len(sentence_new) + len(sentence) > max_length:
+                sentences_new.append(sentence_new)
+                sentence_new = ""
+            sentence_new += sentence
+        if len(sentence_new) > 0:
+            sentences_new.append(sentence_new)
+        sentences = sentences_new
     return sentences
 
 def load_cail2018_corpus(filepaths):
     corpus = []
+    accusations = set()
     for filepath in filepaths:
         with open(filepath, "r", encoding="utf-8") as f:
-            while True:
-                line = f.readline()
-                if line == "": break
+            # while True:
+            #     line = f.readline()
+            #     if line == "": break
+            lines = f.readlines()
+            for line in tqdm(lines, desc=f"{filepath}", total=len(lines)):
                 line = json.loads(line.strip())
+                accusation = ",".join(line["meta"]["accusation"])
+                accusations.add(accusation)
+                # if re.search(r"(抢劫|盗窃)", accusation) is None:
+                if re.search(r"盗窃", accusation) is None:
+                    continue
                 document = line["fact"].strip()
                 document = _process(document)
+                document = _strip(document)
                 sentences = _split_doc(document)
-                sentences = [sentence + "。" for sentence in sentences if len(sentence) > 0]
+                sentences = [sentence.rstrip("。") + "。" for sentence in sentences if len(sentence) > 0]
                 corpus.extend(sentences)
     print(f"{sys._getframe().f_code.co_name} #{len(corpus)}")
     return corpus
 
-def load_cail2020_ydlj_corpus(filepaths):
-    corpus = []
-    for filepath in filepaths:
-        with open(filepath, "r", encoding="utf-8") as f:
-            lines = json.load(f)
-            for line in lines:
-                for sentence in line["context"][0][1]:
-                    corpus.append(_process(sentence))
-    print(f"{sys._getframe().f_code.co_name} #{len(corpus)}")
-    return corpus
+# def load_cail2020_ydlj_corpus(filepaths):
+#     corpus = []
+#     for filepath in filepaths:
+#         with open(filepath, "r", encoding="utf-8") as f:
+#             lines = json.load(f)
+#             for line in lines:
+#                 for sentence in line["context"][0][1]:
+#                     corpus.append(_process(sentence))
+#     print(f"{sys._getframe().f_code.co_name} #{len(corpus)}")
+#     return corpus
 
-def load_cail2021_aqbq_corpus(filepaths):
-    """ 案情标签 """
-    corpus = []
-    for filepath in filepaths:
-        with open(filepath, "r", encoding="utf-8") as f:
-            lines = json.load(f)
-            for line in lines:
-                for sentence in line["content"]:
-                    corpus.append(_process(sentence))
-    print(f"{sys._getframe().f_code.co_name} #{len(corpus)}")
-    return corpus
+# def load_cail2021_aqbq_corpus(filepaths):
+#     """ 案情标签 """
+#     corpus = []
+#     for filepath in filepaths:
+#         with open(filepath, "r", encoding="utf-8") as f:
+#             lines = json.load(f)
+#             for line in lines:
+#                 for sentence in line["content"]:
+#                     corpus.append(_process(sentence))
+#     print(f"{sys._getframe().f_code.co_name} #{len(corpus)}")
+#     return corpus
 
 def load_cail2021_aljs_candidate_corpus(dirname):
     """ 案类检索 """
@@ -79,10 +117,14 @@ def load_cail2021_aljs_candidate_corpus(dirname):
             filename = os.path.join(subdir, filename)
             with open(filename, "r", encoding="utf-8") as f:
                 line = json.load(f)
+                # if re.search(r"(抢劫|盗窃)", line["ajName"]) is None:
+                if re.search(r"盗窃", line["ajName"]) is None:
+                    continue
                 for key in ["ajjbqk", "cpfxgc", "pjjg", "qw"]:
                     document = line.get(key, None)
                     if document is None: continue
                     document = _process(document)
+                    document = _strip(document)
                     sentences = _split_doc(document)
                     sentences = [sentence + "。" for sentence in sentences if len(sentence) > 0]
                     corpus.extend(sentences)
@@ -96,7 +138,12 @@ def load_cail2021_ydlj_corpus(filepaths):
         with open(filepath, "r", encoding="utf-8") as f:
             lines = json.load(f)["data"]
             for line in lines:
+                # if re.search(r"(抢劫|盗窃)", line["paragraphs"][0]["casename"]) is None:
+                if re.search(r"盗窃", line["paragraphs"][0]["casename"]) is None:
+                    continue
                 document = line["paragraphs"][0]["context"]
+                document = _process(document)
+                document = _strip(document)
                 sentences = _split_doc(document)
                 sentences = [sentence + "。" for sentence in sentences if len(sentence) > 0]
                 corpus.extend(sentences)
@@ -114,6 +161,7 @@ def load_cail2021_xxcq_corpus(filepaths):
                 line = json.loads(line.strip())
                 document = line["context"].strip()
                 document = _process(document)
+                document = _strip(document)
                 sentences = _split_doc(document)
                 sentences = [sentence + "。" for sentence in sentences if len(sentence) > 0]
                 corpus.extend(sentences)
@@ -136,16 +184,16 @@ def main(args):
             "../cail_raw_data/2018/CAIL2018_ALL_DATA/final_all_data/final_test.json",
         ]))
 
-    corpus.extend(
-        load_cail2020_ydlj_corpus([
-            "../cail_raw_data/2020/ydlj_small_data/train.json",
-            "../cail_raw_data/2020/ydlj_big_data/train.json",
-        ]))
+    # corpus.extend(
+    #     load_cail2020_ydlj_corpus([
+    #         "../cail_raw_data/2020/ydlj_small_data/train.json",
+    #         "../cail_raw_data/2020/ydlj_big_data/train.json",
+    #     ]))
 
-    corpus.extend(
-        load_cail2021_aqbq_corpus([
-            "../cail_raw_data/2021/案情标签_第一阶段/aqbq/train.json",
-        ]))
+    # corpus.extend(
+    #     load_cail2021_aqbq_corpus([
+    #         "../cail_raw_data/2021/案情标签_第一阶段/aqbq/train.json",
+    #     ]))
 
     corpus.extend(
         load_cail2021_aljs_candidate_corpus(
@@ -177,21 +225,32 @@ def main(args):
     corpus = list(map(lambda x: x + "\n", corpus))
     with open(os.path.join(args.output_dir, "corpus.txt"), "w", encoding="utf-8") as f:
         f.writelines(corpus)
-    num_corpus_train = int(num_corpus * args.train_ratio)
-    corpus_train = corpus[: num_corpus_train]
-    corpus_valid = corpus[num_corpus_train: ]
-    with open(os.path.join(args.output_dir, "corpus.train.txt"), "w", encoding="utf-8") as f:
-        f.writelines(corpus_train)
-    with open(os.path.join(args.output_dir, "corpus.valid.txt"), "w", encoding="utf-8") as f:
-        f.writelines(corpus_valid)
+    
+    # with open(os.path.join(args.output_dir, "corpus.txt"), "r", encoding="utf-8") as f:
+    #     corpus = f.readlines()
+    # corpus_train_tiny = corpus[:1000]
+    # corpus_valid_tiny = corpus[1000:1200]
+    # with open(os.path.join(args.output_dir, "corpus.train.tiny.txt"), "w", encoding="utf-8") as f:
+    #     f.writelines(corpus_train_tiny)
+    # with open(os.path.join(args.output_dir, "corpus.valid.tiny.txt"), "w", encoding="utf-8") as f:
+    #     f.writelines(corpus_valid_tiny)
+
+    if args.train_ratio is not None:
+        num_corpus_train = int(num_corpus * args.train_ratio)
+        corpus_train = corpus[: num_corpus_train]
+        corpus_valid = corpus[num_corpus_train: ]
+        with open(os.path.join(args.output_dir, "corpus.train.txt"), "w", encoding="utf-8") as f:
+            f.writelines(corpus_train)
+        with open(os.path.join(args.output_dir, "corpus.valid.txt"), "w", encoding="utf-8") as f:
+            f.writelines(corpus_valid)
 
 if __name__ == '__main__':
     parser = ArgumentParser()
     # parser.add_argument("--data_dir", type=str, default="data/")
-    parser.add_argument("--output_dir", type=str, default="data/")
+    parser.add_argument("--output_dir", type=str, default="../cail_processed_data/")
     parser.add_argument("--min_length", type=int, default=20)
     parser.add_argument("--max_length", type=int, default=256)
-    parser.add_argument("--train_ratio", type=float, default=0.8)
+    parser.add_argument("--train_ratio", type=float, default=None)
     parser.add_argument("--seed", default=42, type=int, help="Seed.")
     args = parser.parse_args()
 
