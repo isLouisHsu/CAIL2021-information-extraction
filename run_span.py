@@ -1523,6 +1523,7 @@ if __name__ == "__main__":
     if args.do_train:
         config = config_class.from_pretrained(args.config_name if args.config_name else args.model_name_or_path,
                                             num_labels=num_labels, max_span_length=args.max_span_length,
+                                            width_embedding_dim=args.width_embedding_dim,
                                             cache_dir=args.cache_dir if args.cache_dir else None, )
         tokenizer = tokenizer_class.from_pretrained(args.tokenizer_name if args.tokenizer_name else args.model_name_or_path,
                                                     do_lower_case=args.do_lower_case,
@@ -1542,6 +1543,7 @@ if __name__ == "__main__":
             logger.info("Loading model checkpoint from %s", best_checkpoints)
             config = config_class.from_pretrained(best_checkpoints,
                                                   num_labels=num_labels, max_span_length=args.max_span_length,
+                                                  width_embedding_dim=args.width_embedding_dim,
                                                   cache_dir=args.cache_dir if args.cache_dir else None, )
             tokenizer = tokenizer_class.from_pretrained(best_checkpoints,
                                                         do_lower_case=args.do_lower_case, 
@@ -1566,6 +1568,7 @@ if __name__ == "__main__":
     if args.do_eval and args.local_rank in [-1, 0]:
         config = config_class.from_pretrained(args.output_dir,
                                               num_labels=num_labels, max_span_length=args.max_span_length,
+                                              width_embedding_dim=args.width_embedding_dim,
                                               cache_dir=args.cache_dir if args.cache_dir else None, )
         tokenizer = tokenizer_class.from_pretrained(args.output_dir, do_lower_case=args.do_lower_case)
         checkpoints = [args.output_dir]

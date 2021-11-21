@@ -18,8 +18,8 @@ def main():
     local_debug = run_args.local_debug
 
     # WARNING：以下配置需要在提交前指定！！！
-    # span_proba_thresh = 0.0
-    span_proba_thresh = 0.3
+    span_proba_thresh = 0.0
+    # span_proba_thresh = 0.3
     # version = "baseline"
     # model_type = "bert_span"
     # dataset_name = "cail_ner"
@@ -62,11 +62,11 @@ def main():
     # n_splits = 5
     # seed=42
     # --------------------------
-    # version = "nezha-legal-fgm1.0-lsr0.1"
-    # model_type = "nezha_span"
-    # dataset_name = "cail_ner"
-    # n_splits = 5
-    # seed=42
+    version = "nezha-legal-fgm1.0-lsr0.1"
+    model_type = "nezha_span"
+    dataset_name = "cail_ner"
+    n_splits = 5
+    seed=42
     # --------------------------
     # version = "nezha-legal-fgm1.0-lsr0.1-ema3"
     # model_type = "nezha_span"
@@ -80,11 +80,11 @@ def main():
     # n_splits = 5
     # seed=42
     # --------------------------
-    version = "nezha-legal-fgm1.0-lsr0.1-v2"
-    model_type = "nezha_span"
-    dataset_name = "cail_ner"
-    n_splits = 5
-    seed=42
+    # version = "nezha-legal-fgm1.0-lsr0.1-v2"
+    # model_type = "nezha_span"
+    # dataset_name = "cail_ner"
+    # n_splits = 5
+    # seed=42
     # seed=32
     # seed=12345
     # --------------------------
